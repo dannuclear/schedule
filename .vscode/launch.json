@@ -76,6 +76,31 @@
                 "--day", "${input:day}",
                 "${input:extraArgs}"
             ]
+        },
+        {
+            "name": "Началка (по умолчанию)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/run.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "Расписание_структура.json",
+                "-o", "out",
+                "--part", "beginners",
+                "--day", "all",
+                "--view", "classes",
+                "--cell-info", "full",
+                "--font-subj", "10",
+                "--lesson-time", "both",
+                "--canvas", "a3",
+                "--canvas-orientation", "landscape",
+                "--size", "a3",
+                "--orientation", "landscape",
+                "--cell-width", "1.0",
+                "--cell-height", "1.0",
+                "--line-density", "0.85"
+            ]
         }
     ]
 }
