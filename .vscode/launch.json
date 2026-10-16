@@ -95,7 +95,7 @@
                 "--lesson-time", "both",
                 "--canvas", "a3",
                 "--canvas-orientation", "landscape",
-                "--size", "a3",
+                "--size", "a2",
                 "--orientation", "landscape",
                 "--cell-width", "1.0",
                 "--cell-height", "1.0",

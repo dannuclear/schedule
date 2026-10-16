@@ -117,6 +117,7 @@ def build_summary(data: ScheduleData,
                     row.append("")
                     keys_row.append(None)
                     continue
+
                 lines = cell_lines_for_lesson_group(
                     lessons, data, view, cell_info)
                 row.append(cell_paragraph(
@@ -126,10 +127,14 @@ def build_summary(data: ScheduleData,
                     font=font,
                     line_density=line_density,
                 ))
-                parts_count = sum(
-                    len(les.get("parts", []) or []) for les in lessons
-                )
-                keys_row.append((lines, parts_count > 1))
+
+                # multi_class: True, если в клетке задействовано
+                # больше одного класса
+                total_classes: set[str] = set()
+                for les in lessons:
+                    total_classes.update(les["classes"])
+                keys_row.append((lines, len(total_classes) > 1))
+
             rows.append(row)
             rows_keys.append(keys_row)
             row_heights.append(row_h)

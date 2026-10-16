@@ -8,15 +8,15 @@ def cell_key(cell) -> str | None:
     Нормализованный ключ для сравнения или None, если объединять нельзя.
 
     Значения в rows_keys:
-      None                — пусто;
-      (lines, multi_flag) — содержимое + признак «parts > 1».
-    Объединяем только ячейки с multi_flag=True.
+      None                 — пусто;
+      (lines, multi_class) — содержимое + признак «classes > 1».
+    Объединяем только ячейки с multi_class=True.
     """
     if cell is None:
         return None
     if isinstance(cell, tuple) and len(cell) == 2:
-        lines, multi = cell
-        if not multi:
+        lines, multi_class = cell
+        if not multi_class:
             return None
         joined = "|".join(x for x in lines if x)
         return joined or None
