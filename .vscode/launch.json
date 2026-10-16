@@ -1,0 +1,81 @@
+{
+    "version": "0.2.0",
+    "inputs": [
+        {
+            "id": "part",
+            "type": "pickString",
+            "description": "Часть школы",
+            "options": ["all", "beginners", "basic"],
+            "default": "all"
+        },
+        {
+            "id": "day",
+            "type": "pickString",
+            "description": "День недели",
+            "options": ["all", "1", "2", "3", "4", "5"],
+            "default": "all"
+        },
+        {
+            "id": "view",
+            "type": "pickString",
+            "description": "Что в колонках",
+            "options": ["classes", "teachers", "rooms"],
+            "default": "classes"
+        },
+        {
+            "id": "cell_info",
+            "type": "pickString",
+            "description": "Что во 2-й строке ячейки",
+            "options": ["full", "teachers", "rooms", "classes"],
+            "default": "full"
+        },
+        {
+            "id": "lesson_time",
+            "type": "pickString",
+            "description": "Что в колонке урока",
+            "options": ["none", "short", "both"],
+            "default": "none"
+        },
+        {
+            "id": "extraArgs",
+            "type": "promptString",
+            "description": "Дополнительные аргументы через пробел (можно пусто). ВНИМАНИЕ: пробелы внутри значения одного аргумента не поддерживаются.",
+            "default": ""
+        }
+    ],
+    "configurations": [
+        {
+            "name": "Сводное (run.py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/run.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "Расписание_структура.json",
+                "-o", "out",
+                "--part", "${input:part}",
+                "--day", "${input:day}",
+                "--view", "${input:view}",
+                "--cell-info", "${input:cell_info}",
+                "--lesson-time", "${input:lesson_time}",
+                "${input:extraArgs}"
+            ]
+        },
+        {
+            "name": "По преподавателям (run_teachers.py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/run_teachers.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "Расписание_структура.json",
+                "-o", "out",
+                "--part", "${input:part}",
+                "--day", "${input:day}",
+                "${input:extraArgs}"
+            ]
+        }
+    ]
+}
