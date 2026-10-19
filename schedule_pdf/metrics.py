@@ -1,18 +1,36 @@
-"""Холст, метрики ячейки, авторазмеры шрифта."""
+"""Холст, метрики ячейки, авторазмеры шрифта.
+
+Метрики считаются один раз и используются и для PDF, и для диагностики.
+Три правила, из которых всё выводится:
+
+1. таблица обязана влезть на лист — из высоты холста вычитается место
+   под заголовок (HEADER_ALLOW_MM), а Frame в render.py рисуется без
+   собственных padding;
+2. печатаются только занятые уроки (used_slots), а не всегда 9;
+3. кегль вписывается и по ширине колонки, и по высоте строки — ширина
+   берётся из реальных строк через pdfmetrics.stringWidth, поэтому
+   длинные подписи («Прохорова(205) / Бакшаев(221)») не переносятся.
+"""
 
 from __future__ import annotations
 
 from typing import Callable
 
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
 
+from .cell import cell_lines_for_lesson_group
 from .config import (
-    ASPECT, ROW_HEIGHT_FACTOR,
-    MARGIN_X, MARGIN_Y,
+    ASPECT,
     CANVAS_REF_W_MM, CANVAS_REF_H_MM,
-    PAGE_SIZES, ORIENTATIONS,
+    CELL_FILL_RATIO, CELL_PADDING, CELL_WIDTH_SAFETY,
+    HEADER_ALLOW_MM, MIN_FONT_INFO, MIN_FONT_SUBJ,
+    MARGIN_X, MARGIN_Y,
+    ORIENTATIONS, PAGE_SIZES, ROW_HEIGHT_FACTOR,
 )
 from .model import ScheduleData
+
+MAX_FONT = 18.0
 
 
 # --- Холст ---
@@ -39,7 +57,13 @@ def canvas_scale(canvas_name: str, orient_name: str) -> float:
     return max(0.5, min(4.0, (area / ref) ** 0.5))
 
 
-# --- Колонки ---
+# --- Колонки и строки ---
+
+def used_slots(data: ScheduleData) -> list[int]:
+    """Номера уроков, которые реально заняты в отфильтрованном наборе."""
+    slots = sorted({les["slot"] for les in data.lessons})
+    return slots or [s["n"] for s in data.slots[:1]] or [1]
+
 
 def summary_columns(data: ScheduleData, view: str) -> list[dict]:
     import re
@@ -73,55 +97,117 @@ def summary_lookup(data: ScheduleData, view: str) -> Callable:
     raise ValueError(view)
 
 
-# --- Метрики макета ---
+# --- Измерение содержимого ---
+
+def text_width_per_pt(text: str, font: str) -> float:
+    """Ширина строки при кегле 1 pt (в точках)."""
+    if not text:
+        return 0.0
+    try:
+        return pdfmetrics.stringWidth(text, font, 1.0)
+    except Exception:                     # шрифт не зарегистрирован
+        return 0.55 * len(text)
+
+
+def content_extents(data: ScheduleData, view: str,
+                    days: list[int], slots: list[int],
+                    cell_info: str, font: str = "Helvetica",
+                    font_bold: str | None = None) -> tuple[float, float]:
+    """(ширина при 1 pt для первой строки, для второй) по всей таблице."""
+    lookup = summary_lookup(data, view)
+    head_w = 0.0
+    info_w = 0.0
+    for col in summary_columns(data, view):
+        for day in days:
+            for slot in slots:
+                lessons = lookup(col["id"], day, slot)
+                if not lessons:
+                    continue
+                lines = cell_lines_for_lesson_group(
+                    lessons, data, view, cell_info)
+                for i, line in enumerate(lines):
+                    if not line:
+                        continue
+                    if i == 0:
+                        head_w = max(
+                            head_w, text_width_per_pt(line, font_bold or font))
+                    else:
+                        info_w = max(info_w, text_width_per_pt(line, font))
+    return head_w, info_w
+
+
+def fit_fonts(col_w: float, row_h: float,
+              head_w: float, info_w: float,
+              line_density: float = 0.85) -> tuple[float, float]:
+    """Кегли (предмет, вторая строка), вписанные в ячейку.
+
+    head_w/info_w — ширина самых длинных строк при кегле 1 pt.
+    Учитываются и ширина колонки (строка не переносится), и высота строки:
+    абзац в ячейке один, поэтому leading общий и равен
+    subj_size × line_density, а две строки занимают 2 × subj_size × ld.
+    """
+    usable_w = max(4.0, col_w - CELL_PADDING) * CELL_WIDTH_SAFETY
+    ld = max(0.5, line_density)
+    budget = (row_h * CELL_FILL_RATIO) / ld      # суммарная высота в кеглях
+
+    subj = MAX_FONT
+    if head_w > 0:
+        subj = min(subj, usable_w / head_w)
+
+    info = MAX_FONT
+    if info_w > 0:
+        info = min(info, usable_w / info_w)
+    info = min(info, 0.75 * subj)
+
+    subj = min(subj, budget / 2.0)               # две строки по subj
+
+    subj = max(MIN_FONT_SUBJ, subj)
+    info = max(MIN_FONT_INFO, min(info, 0.75 * subj))
+    return subj, info
+
+
+# --- Метрики макета: сводная таблица ---
 
 def compute_layout_metrics(data: ScheduleData,
                            canvas_name: str, canvas_orient: str,
                            view: str, days: list[int],
                            cell_width_factor: float,
-                           cell_height_factor: float) -> dict:
-    """
-    Считает все метрики один раз — и для PDF, и для диагностики.
-
-    Высоты:
-      * обычная строка урока = base_row_h × cell_height_factor;
-      * строка дня недели   = base_row_h × ROW_HEIGHT_FACTOR (0.5).
-    """
+                           cell_height_factor: float,
+                           cell_info: str = "full",
+                           line_density: float = 0.85,
+                           font: str = "Helvetica",
+                           font_bold: str | None = None) -> dict:
+    """Считает метрики один раз — и для PDF, и для диагностики."""
     cols = summary_columns(data, view)
     n_cols = 1 + len(cols)
+    slots = used_slots(data)
 
     W, H_canvas = canvas_inner_size(canvas_name, canvas_orient)
-    k = canvas_scale(canvas_name, canvas_orient)
 
     base_col_w = W / n_cols
     base_row_h = base_col_w / ASPECT
 
-    # --- число строк ---
-    n_rows = 2                 # шапка
-    n_day_rows = 0
-    n_lesson_rows = 0
-    for _day in days:
-        n_rows += 1            # строка дня
-        n_day_rows += 1
-        n_rows += 9            # 9 уроков
-        n_lesson_rows += 9
+    # высота холста, доступная таблице
+    avail_h = max(1.0, H_canvas - HEADER_ALLOW_MM * mm)
 
-    # --- высоты ---
-    row_h = base_row_h * cell_height_factor
-    day_row_h = base_row_h * ROW_HEIGHT_FACTOR
-
-    # --- эффективная высота для обрезки ---
-    eff_h = 2 * row_h + n_day_rows * day_row_h + n_lesson_rows * row_h
-    if eff_h > H_canvas:
-        k_row = H_canvas / eff_h
-        row_h *= k_row
-        day_row_h *= k_row
+    n_rows = 2 + len(days) * (1 + len(slots))
+    units = 2 + len(days) * (ROW_HEIGHT_FACTOR + len(slots))
+    row_h = min(base_row_h, avail_h / units) * cell_height_factor
+    if units * row_h > avail_h:                 # cell_height_factor > 1
+        row_h = avail_h / units
+    day_row_h = row_h * ROW_HEIGHT_FACTOR
 
     col_w = base_col_w * cell_width_factor
+
+    head_w, info_w = content_extents(
+        data, view, days, slots, cell_info, font, font_bold)
+    font_subj, font_info = fit_fonts(
+        col_w, row_h, head_w, info_w, line_density)
 
     return {
         "n_cols": n_cols,
         "n_rows": n_rows,
+        "slots": slots,
         "base_col_w": base_col_w,
         "base_row_h": base_row_h,
         "col_w": col_w,
@@ -129,24 +215,26 @@ def compute_layout_metrics(data: ScheduleData,
         "day_row_h": day_row_h,
         "canvas_w": W,
         "canvas_h": H_canvas,
-        "canvas_k": k,
+        "canvas_k": canvas_scale(canvas_name, canvas_orient),
+        "font_subj": font_subj,
+        "font_info": font_info,
+        "max_head_w": head_w,
+        "max_info_w": info_w,
     }
 
 
-# --- Автошрифт ---
+# --- Совместимость: автошрифт по одной высоте строки ---
 
-def auto_font_sizes(row_h_pt: float, canvas_k: float
-                    ) -> tuple[float, float]:
-    """
-    Возвращает (font_subj, font_info) в pt.
-    Опирается на фактическую высоту обычной строки.
+def auto_font_sizes(row_h_pt: float, canvas_k: float,
+                    line_density: float = 0.85) -> tuple[float, float]:
+    """Оценка кеглей по высоте строки, без учёта ширины колонки."""
+    budget = (row_h_pt * CELL_FILL_RATIO) / max(0.5, line_density)
+    subj = max(MIN_FONT_SUBJ, min(MAX_FONT, budget / 1.75))
+    info = max(MIN_FONT_INFO, min(0.75 * subj, budget - subj))
+    return subj, info
 
-    info-строка (преподаватели/кабинеты) — 0.75 от шрифта предмета.
-    """
-    ref_row = 22.0 * mm
-    by_row = (row_h_pt / ref_row) ** 0.5
-    subj = max(3.5, min(18.0, 3.0 * canvas_k * by_row))
-    return subj, subj * 0.75
+
+# --- Метрики для таблицы «по преподавателям» ---
 
 def teacher_rows(data: ScheduleData) -> list[str]:
     """Id преподавателей, у которых есть уроки в отфильтрованном наборе."""
@@ -154,47 +242,66 @@ def teacher_rows(data: ScheduleData) -> list[str]:
     return [t["id"] for t in data.teachers if t["id"] in used]
 
 
+def _teachers_cell_text(data: ScheduleData, tid: str,
+                        day: int, slot: int) -> str:
+    lessons = data.by_teacher.get((tid, day, slot), [])
+    seen: list[str] = []
+    for les in lessons:
+        for cls in les["classes"]:
+            if cls not in seen:
+                seen.append(cls)
+    return " / ".join(seen)
+
+
 def teachers_layout_metrics(data: ScheduleData,
                             canvas_name: str, canvas_orient: str,
                             days: list[int],
                             cell_width_factor: float,
-                            cell_height_factor: float) -> dict:
-    """
-    Метрики для таблицы:
-      колонки: 1 (ФИО) + n_days × n_slots
-      строки:  2 шапки + по одной на каждого преподавателя
-
-    Высота строк тела ×2 от базовой.
-    """
+                            cell_height_factor: float,
+                            line_density: float = 0.85,
+                            font: str = "Helvetica",
+                            font_bold: str | None = None) -> dict:
+    """Метрики для таблицы «строки — преподаватели»."""
     teachers = teacher_rows(data)
-    n_slots = len(data.slots)
+    slots = used_slots(data)
+    n_slots = len(slots)
     n_days = len(days)
 
     W, H_canvas = canvas_inner_size(canvas_name, canvas_orient)
-    k = canvas_scale(canvas_name, canvas_orient)
 
     n_cols = 1 + n_days * n_slots
 
-    name_col_share = 0.18
-    name_col_w = W * name_col_share * cell_width_factor
-    day_col_w = (W - name_col_w) / (n_days * n_slots) * cell_width_factor
+    name_col_w = W * 0.18 * cell_width_factor
+    day_col_w = ((W - name_col_w) / (n_days * n_slots) * cell_width_factor
+                 if n_days * n_slots else W)
 
-    base_row_h = day_col_w / ASPECT
-    row_h = base_row_h * cell_height_factor * 2.0   # ← ×2
+    avail_h = max(1.0, H_canvas - HEADER_ALLOW_MM * mm)
+    n_body = max(1, len(teachers))
+    row_h = min(day_col_w / ASPECT * cell_height_factor * 2.0,
+                avail_h / (2 + n_body))
 
-    n_rows = 2 + max(1, len(teachers))
-    eff_h = 2 * row_h + (len(teachers) * row_h)     # шапка + тело
-    if eff_h > H_canvas:
-        k_row = H_canvas / eff_h
-        row_h *= k_row
+    max_w = 0.0
+    for tid in teachers:
+        for day in days:
+            for slot in slots:
+                text = _teachers_cell_text(data, tid, day, slot)
+                if text:
+                    max_w = max(max_w, text_width_per_pt(text, font))
+    font_subj, font_info = fit_fonts(
+        day_col_w, row_h, max_w, 0.0, line_density)
 
     return {
         "n_cols": n_cols,
+        "n_rows": 2 + n_body,
+        "slots": slots,
         "name_col_w": name_col_w,
         "day_col_w": day_col_w,
         "row_h": row_h,
         "day_row_h": row_h,
         "canvas_w": W,
         "canvas_h": H_canvas,
-        "canvas_k": k,
+        "canvas_k": canvas_scale(canvas_name, canvas_orient),
+        "font_subj": font_subj,
+        "font_info": font_info,
+        "max_head_w": max_w,
     }

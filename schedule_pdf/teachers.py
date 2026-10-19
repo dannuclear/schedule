@@ -66,7 +66,7 @@ def build_teachers_table(data: ScheduleData,
       низ:  пусто + [1..N] + [1..N] + …
     Тело: одна строка на преподавателя; в ячейке — только классы.
     """
-    slot_numbers = [s["n"] for s in data.slots]
+    slot_numbers = metrics.get("slots") or [s["n"] for s in data.slots]
     n_slots = len(slot_numbers)
     n_days = len(days)
 

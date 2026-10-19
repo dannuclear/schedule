@@ -51,8 +51,13 @@ def make_doc(path: str, title: str, subtitle: str,
         leftMargin=MARGIN_X, rightMargin=MARGIN_X,
         topMargin=MARGIN_Y, bottomMargin=MARGIN_Y, title=title,
     )
+    # padding=0: поля страницы уже заданы через MARGIN_X/MARGIN_Y,
+    # а дефолтные 6 pt Frame съедали 12 pt высоты и выталкивали
+    # последние строки таблицы на второй лист.
     frame = Frame(doc.leftMargin, doc.bottomMargin,
-                  doc.width, doc.height, id="main")
+                  doc.width, doc.height, id="main",
+                  leftPadding=0, rightPadding=0,
+                  topPadding=0, bottomPadding=0)
 
     def on_page(canvas, d):
         canvas.saveState()

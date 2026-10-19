@@ -122,42 +122,45 @@ def cell_lines_for_lesson_group(lessons: list[dict], data: ScheduleData,
     return [" / ".join(subj_parts), " / ".join(info_parts)]
 
 
+def _line_paragraph(text: str, *, size: float, leading: float,
+                    font: str, bold: bool) -> Paragraph:
+    style = ParagraphStyle(
+        "cell-line", fontName=font, fontSize=size, leading=leading,
+        alignment=TA_CENTER, spaceBefore=0, spaceAfter=0,
+    )
+    body = f"<b>{escape(text)}</b>" if bold else escape(text)
+    return Paragraph(body, style)
+
+
 def cell_paragraph(lines: list[str], *,
                    subj_size: float,
                    info_size: float,
                    font: str,
                    line_density: float,
                    align=TA_CENTER) -> Paragraph:
-    base_size = max(subj_size, info_size)
-    leading = max(1.0, base_size * line_density)
+    """Ячейка одним абзацем: строка предмета + строка информации.
 
-    st_empty = ParagraphStyle(
-        "cell-empty", fontName=font, fontSize=subj_size,
-        leading=leading, alignment=align,
+    Абзац один, поэтому межстрочный интервал (leading) общий и считается
+    от большего кегля — это учтено в metrics.fit_fonts(): суммарная высота
+    двух строк = 2 × subj_size × line_density.
+    """
+    texts = [raw for raw in (lines or []) if raw]
+    base = max(subj_size, info_size)
+    leading = max(1.0, base * max(0.5, line_density))
+
+    style = ParagraphStyle(
+        "cell", fontName=font, fontSize=subj_size, leading=leading,
+        alignment=align, spaceBefore=0, spaceAfter=0,
     )
-
-    if not lines:
-        return Paragraph("", st_empty)
-    while lines and not lines[-1]:
-        lines = lines[:-1]
-    if not lines:
-        return Paragraph("", st_empty)
+    if not texts:
+        return Paragraph("", style)
 
     chunks: list[str] = []
-    for i, raw in enumerate(lines):
-        if not raw:
-            continue
+    for i, raw in enumerate(texts):
         if i == 0:
-            chunks.append(f'<font size="{subj_size:.1f}">'
-                         f'<b>{escape(raw)}</b></font>')
+            chunks.append(f'<font size="{subj_size:.2f}">'
+                          f'<b>{escape(raw)}</b></font>')
         else:
-            chunks.append(f'<font size="{info_size:.1f}">'
-                         f'{escape(raw)}</font>')
-    html = "<br/>".join(chunks)
-
-    st = ParagraphStyle(
-        "cell", fontName=font, fontSize=subj_size,
-        leading=leading, alignment=align,
-        spaceBefore=0, spaceAfter=0,
-    )
-    return Paragraph(html, st)
+            chunks.append(f'<font size="{info_size:.2f}">'
+                          f'{escape(raw)}</font>')
+    return Paragraph("<br/>".join(chunks), style)

@@ -10,8 +10,7 @@ from reportlab.lib.units import mm as _mm
 from .config import DAY_ALIASES, DAY_NAMES, PART_LABEL, PAGE_SIZES
 from .fonts import register_cyrillic_font, resolve_bold
 from .metrics import (
-    auto_font_sizes, resolve_pagesize, teacher_rows,
-    teachers_layout_metrics,
+    resolve_pagesize, teacher_rows, teachers_layout_metrics,
 )
 from .model import load_schedule
 from .render import generate_teachers_pdf
@@ -36,6 +35,7 @@ def build_argparser() -> argparse.ArgumentParser:
     ap.add_argument("--cell-width", type=float, default=1.0)
     ap.add_argument("--cell-height", type=float, default=1.0)
     ap.add_argument("--font-subj", type=float, default=None)
+    ap.add_argument("--line-density", type=float, default=0.85)
     ap.add_argument("--lesson-time", default="none",
                     choices=["none", "short", "both"])
     return ap
@@ -80,11 +80,12 @@ def main() -> None:
 
     metrics = teachers_layout_metrics(
         data, canvas_name, canvas_orient, days, cw, ch,
+        line_density=max(0.5, min(1.5, args.line_density)),
+        font=font, font_bold=font_bold,
     )
 
-    auto_subj, _ = auto_font_sizes(metrics["row_h"],
-                                   metrics["canvas_k"])
-    font_subj = args.font_subj if args.font_subj is not None else auto_subj
+    font_subj = (args.font_subj if args.font_subj is not None
+                 else metrics["font_subj"])
 
     teachers = teacher_rows(data)
     print(f"  логический холст: {canvas_name} / {canvas_orient} "
@@ -94,6 +95,7 @@ def main() -> None:
           f"масштаб ×{metrics['canvas_k']:.2f}")
     print(f"  формат PDF:       {args.size} / {args.orientation}")
     print(f"  преподавателей:   {len(teachers)}")
+    print(f"  уроки в таблице:  {metrics['slots']}")
     print(f"  множители:        ширина ×{cw:.2f}, высота ×{ch:.2f}")
     print(f"  колонки:          ФИО {metrics['name_col_w'] / _mm:.2f} мм, "
           f"день-урок {metrics['day_col_w'] / _mm:.2f} мм")

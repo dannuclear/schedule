@@ -56,6 +56,8 @@ def build_summary(data: ScheduleData,
         metrics = compute_layout_metrics(
             data, canvas_name, canvas_orient, view, days,
             cell_width_factor, cell_height_factor,
+            cell_info=cell_info, line_density=line_density,
+            font=font, font_bold=font_bold,
         )
 
     n_cols = metrics["n_cols"]
@@ -108,7 +110,7 @@ def build_summary(data: ScheduleData,
         day_bg_rows.append(len(rows) - 1)
 
         # ---- строки уроков ----
-        for slot in range(1, 10):
+        for slot in metrics["slots"]:
             row: list = [format_slot_label(data, slot, lesson_time)]
             keys_row: list = [None]
             for c in cols:
