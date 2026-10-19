@@ -58,8 +58,7 @@
                 "--day", "${input:day}",
                 "--view", "${input:view}",
                 "--cell-info", "${input:cell_info}",
-                "--lesson-time", "${input:lesson_time}",
-                "${input:extraArgs}"
+                "--lesson-time", "${input:lesson_time}"
             ]
         },
         {
@@ -73,8 +72,7 @@
                 "Расписание_структура.json",
                 "-o", "out",
                 "--part", "${input:part}",
-                "--day", "${input:day}",
-                "${input:extraArgs}"
+                "--day", "${input:day}"
             ]
         },
         {
