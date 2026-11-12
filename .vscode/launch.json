@@ -5,35 +5,59 @@
             "id": "part",
             "type": "pickString",
             "description": "Часть школы",
-            "options": ["all", "beginners", "basic"],
+            "options": [
+                "all",
+                "beginners",
+                "basic"
+            ],
             "default": "all"
         },
         {
             "id": "day",
             "type": "pickString",
             "description": "День недели",
-            "options": ["all", "1", "2", "3", "4", "5"],
+            "options": [
+                "all",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5"
+            ],
             "default": "all"
         },
         {
             "id": "view",
             "type": "pickString",
             "description": "Что в колонках",
-            "options": ["classes", "teachers", "rooms"],
+            "options": [
+                "classes",
+                "teachers",
+                "rooms"
+            ],
             "default": "classes"
         },
         {
             "id": "cell_info",
             "type": "pickString",
             "description": "Что во 2-й строке ячейки",
-            "options": ["full", "teachers", "rooms", "classes"],
+            "options": [
+                "full",
+                "teachers",
+                "rooms",
+                "classes"
+            ],
             "default": "full"
         },
         {
             "id": "lesson_time",
             "type": "pickString",
             "description": "Что в колонке урока",
-            "options": ["none", "short", "both"],
+            "options": [
+                "none",
+                "short",
+                "both"
+            ],
             "default": "none"
         },
         {
@@ -45,6 +69,13 @@
     ],
     "configurations": [
         {
+            "name": "Отладчик Python: текущий файл",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/server.py",
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Сводное (run.py)",
             "type": "debugpy",
             "request": "launch",
@@ -53,12 +84,18 @@
             "cwd": "${workspaceFolder}",
             "args": [
                 "Расписание_структура.json",
-                "-o", "out",
-                "--part", "${input:part}",
-                "--day", "${input:day}",
-                "--view", "${input:view}",
-                "--cell-info", "${input:cell_info}",
-                "--lesson-time", "${input:lesson_time}"
+                "-o",
+                "out",
+                "--part",
+                "${input:part}",
+                "--day",
+                "${input:day}",
+                "--view",
+                "${input:view}",
+                "--cell-info",
+                "${input:cell_info}",
+                "--lesson-time",
+                "${input:lesson_time}"
             ]
         },
         {
@@ -70,9 +107,12 @@
             "cwd": "${workspaceFolder}",
             "args": [
                 "Расписание_структура.json",
-                "-o", "out",
-                "--part", "${input:part}",
-                "--day", "${input:day}"
+                "-o",
+                "out",
+                "--part",
+                "${input:part}",
+                "--day",
+                "${input:day}"
             ]
         },
         {
@@ -84,20 +124,34 @@
             "cwd": "${workspaceFolder}",
             "args": [
                 "Расписание_структура.json",
-                "-o", "out",
-                "--part", "beginners",
-                "--day", "all",
-                "--view", "classes",
-                "--cell-info", "full",
-                "--font-subj", "10",
-                "--lesson-time", "both",
-                "--canvas", "a3",
-                "--canvas-orientation", "landscape",
-                "--size", "a2",
-                "--orientation", "landscape",
-                "--cell-width", "1.0",
-                "--cell-height", "1.0",
-                "--line-density", "0.85"
+                "-o",
+                "out",
+                "--part",
+                "beginners",
+                "--day",
+                "all",
+                "--view",
+                "classes",
+                "--cell-info",
+                "full",
+                "--font-subj",
+                "10",
+                "--lesson-time",
+                "both",
+                "--canvas",
+                "a3",
+                "--canvas-orientation",
+                "landscape",
+                "--size",
+                "a2",
+                "--orientation",
+                "landscape",
+                "--cell-width",
+                "1.0",
+                "--cell-height",
+                "1.0",
+                "--line-density",
+                "0.85"
             ]
         }
     ]
