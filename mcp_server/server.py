@@ -1,5 +1,9 @@
+import logging
 import os
+from time import perf_counter
+
 from mcp.server import MCPServer
+from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
 
 from classes import register_tools as register_class_tools
 from rooms import register_tools as register_room_tools
@@ -9,6 +13,38 @@ from teachers import register_tools as register_teachers_tools
 
 HOST = os.environ.get("MCP_HOST", "0.0.0.0")  # слушать на всех интерфейсах машины
 PORT = int(os.environ.get("MCP_PORT", "8200"))
+logger = logging.getLogger("school_schedule.mcp")
+
+
+async def log_tool_calls(
+    ctx: ServerRequestContext,
+    call_next: CallNext,
+) -> HandlerResult:
+    if ctx.method != "tools/call":
+        return await call_next(ctx)
+
+    params = ctx.params or {}
+    tool_name = params.get("name")
+    if not isinstance(tool_name, str):
+        tool_name = "<unknown>"
+    tool_name = tool_name.replace("\r", "\\r").replace("\n", "\\n")
+    started_at = perf_counter()
+    logger.info("MCP tool called: %s", tool_name)
+
+    try:
+        result = await call_next(ctx)
+    except Exception as error:
+        elapsed = perf_counter() - started_at
+        logger.error(
+            "MCP tool failed: %s (%.3fs, %s)",
+            tool_name,
+            elapsed,
+            type(error).__name__,
+        )
+        raise
+
+    logger.info("MCP tool completed: %s (%.3fs)", tool_name, perf_counter() - started_at)
+    return result
 
 server = MCPServer(
     "school-schedule",
@@ -42,6 +78,7 @@ server = MCPServer(
         "в выбранном базовом или недельном файле, сохраняя meta."
     ),
 )
+server.middleware.append(log_tool_calls)
 register_teachers_tools(server)
 register_room_tools(server)
 register_subject_tools(server)
