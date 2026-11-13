@@ -69,10 +69,10 @@
     ],
     "configurations": [
         {
-            "name": "Отладчик Python: текущий файл",
+            "name": "mcp_server",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/server.py",
+            "program": "${workspaceFolder}/mcp/server.py",
             "console": "integratedTerminal"
         },
         {
