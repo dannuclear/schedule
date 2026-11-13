@@ -66,8 +66,7 @@ class JsonStore:
         for item in items:
             if item.get(self.id_field) == item_id:
                 for key, value in changes.items():
-                    if value is not None:
-                        item[key] = value
+                    item[key] = value
                 self.save(items)
                 return item
         raise ValueError(f"Запись с {self.id_field}='{item_id}' не найдена")

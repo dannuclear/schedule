@@ -72,7 +72,7 @@
             "name": "mcp_server",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/mcp/server.py",
+            "program": "${workspaceFolder}/mcp_server/server.py",
             "console": "integratedTerminal"
         },
         {
