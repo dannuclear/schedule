@@ -1,0 +1,123 @@
+name: Deploy schedule MCP
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-schedule-mcp
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Package MCP server
+        run: zip -r mcp-server.zip mcp_server -x '*/__pycache__/*'
+
+      - name: Upload MCP server archive
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: "mcp-server.zip"
+          target: "/tmp/schedule-deploy/"
+
+      - name: Install and restart service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -eu
+
+            APP_DIR="$HOME/schedule"
+            STAGING_DIR="/tmp/schedule-deploy"
+            ARCHIVE="$STAGING_DIR/mcp-server.zip"
+            EXTRACT_DIR="$STAGING_DIR/extracted"
+            SERVICE_NAME="schedule-mcp.service"
+            PREVIOUS_DIR="$APP_DIR/.mcp_server.previous"
+            NEW_DIR=""
+
+            cleanup() {
+              rm -rf "$STAGING_DIR"
+              if [ -n "$NEW_DIR" ]; then
+                rm -rf "$NEW_DIR"
+              fi
+            }
+            trap cleanup EXIT
+
+            healthy() {
+              sleep 5
+              sudo systemctl is-active --quiet "$SERVICE_NAME"
+            }
+
+            test -f "$ARCHIVE"
+            rm -rf "$EXTRACT_DIR"
+            mkdir -p "$EXTRACT_DIR"
+            unzip -q "$ARCHIVE" -d "$EXTRACT_DIR"
+            test -f "$EXTRACT_DIR/mcp_server/server.py"
+
+            mkdir -p "$APP_DIR"
+            NEW_DIR="$(mktemp -d "$APP_DIR/.mcp_server.XXXXXX")"
+            chmod 755 "$NEW_DIR"
+            cp -a "$EXTRACT_DIR/mcp_server/." "$NEW_DIR/"
+            mkdir -p "$NEW_DIR/data"
+
+            if [ ! -x "$APP_DIR/venv/bin/python" ]; then
+              python3 -m venv "$APP_DIR/venv"
+            fi
+            "$APP_DIR/venv/bin/python" -m pip install -r "$NEW_DIR/requirements.txt"
+
+            # Stop the service so JSON data is not written while we copy it.
+            sudo systemctl stop "$SERVICE_NAME"
+
+            if [ -d "$APP_DIR/mcp_server/data" ]; then
+              cp -a "$APP_DIR/mcp_server/data/." "$NEW_DIR/data/" || {
+                echo "Failed to copy data; restarting old version."
+                sudo systemctl start "$SERVICE_NAME"
+                exit 1
+              }
+            fi
+
+            rm -rf "$PREVIOUS_DIR"
+            if [ -d "$APP_DIR/mcp_server" ]; then
+              mv "$APP_DIR/mcp_server" "$PREVIOUS_DIR"
+            fi
+            mv "$NEW_DIR" "$APP_DIR/mcp_server"
+            NEW_DIR=""
+
+            sudo systemctl start "$SERVICE_NAME" || true
+
+            if ! healthy; then
+              echo "Service failed to start; restoring previous MCP server."
+              sudo systemctl stop "$SERVICE_NAME" || true
+              rm -rf "$APP_DIR/mcp_server"
+              if [ -d "$PREVIOUS_DIR" ]; then
+                mv "$PREVIOUS_DIR" "$APP_DIR/mcp_server"
+                sudo systemctl start "$SERVICE_NAME" || true
+                if healthy; then
+                  echo "Previous version restored and running."
+                else
+                  echo "Previous version did NOT start either!"
+                fi
+              fi
+              exit 1
+            fi
+
+            rm -rf "$PREVIOUS_DIR"
+            echo "MCP server deployed successfully."
