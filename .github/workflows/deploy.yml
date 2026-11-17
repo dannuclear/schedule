@@ -63,7 +63,7 @@ jobs:
 
             healthy() {
               sleep 5
-              sudo systemctl is-active --quiet "$SERVICE_NAME"
+              systemctl is-active --quiet "$SERVICE_NAME"
             }
 
             test -f "$ARCHIVE"
@@ -78,21 +78,15 @@ jobs:
             cp -a "$EXTRACT_DIR/mcp_server/." "$NEW_DIR/"
             mkdir -p "$NEW_DIR/data"
 
+            # Keep JSON data that may have been changed by MCP tools on the server.
+            if [ -d "$APP_DIR/mcp_server/data" ]; then
+              cp -a "$APP_DIR/mcp_server/data/." "$NEW_DIR/data/"
+            fi
+
             if [ ! -x "$APP_DIR/venv/bin/python" ]; then
               python3 -m venv "$APP_DIR/venv"
             fi
             "$APP_DIR/venv/bin/python" -m pip install -r "$NEW_DIR/requirements.txt"
-
-            # Stop the service so JSON data is not written while we copy it.
-            sudo systemctl stop "$SERVICE_NAME"
-
-            if [ -d "$APP_DIR/mcp_server/data" ]; then
-              cp -a "$APP_DIR/mcp_server/data/." "$NEW_DIR/data/" || {
-                echo "Failed to copy data; restarting old version."
-                sudo systemctl start "$SERVICE_NAME"
-                exit 1
-              }
-            fi
 
             rm -rf "$PREVIOUS_DIR"
             if [ -d "$APP_DIR/mcp_server" ]; then
@@ -101,15 +95,16 @@ jobs:
             mv "$NEW_DIR" "$APP_DIR/mcp_server"
             NEW_DIR=""
 
-            sudo systemctl start "$SERVICE_NAME" || true
+            sudo systemctl restart "$SERVICE_NAME" || true
 
             if ! healthy; then
               echo "Service failed to start; restoring previous MCP server."
-              sudo systemctl stop "$SERVICE_NAME" || true
-              rm -rf "$APP_DIR/mcp_server"
               if [ -d "$PREVIOUS_DIR" ]; then
+                # Carry over any data written since the swap.
+                cp -a "$APP_DIR/mcp_server/data/." "$PREVIOUS_DIR/data/" 2>/dev/null || true
+                rm -rf "$APP_DIR/mcp_server"
                 mv "$PREVIOUS_DIR" "$APP_DIR/mcp_server"
-                sudo systemctl start "$SERVICE_NAME" || true
+                sudo systemctl restart "$SERVICE_NAME" || true
                 if healthy; then
                   echo "Previous version restored and running."
                 else
