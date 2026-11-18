@@ -1,6 +1,6 @@
 from mcp.server import MCPServer
 
-from JsonStore import classes_store, teachers_store
+from data_access import classes_store, teachers_store
 
 STAGES = {"primary", "basic", "senior"}
 

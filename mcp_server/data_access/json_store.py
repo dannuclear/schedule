@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-DATA_DIR = Path(__file__).parent / "data"
+from .paths import DATA_DIR
 
 
 class JsonStore:
@@ -72,7 +72,6 @@ class JsonStore:
         raise ValueError(f"Запись с {self.id_field}='{item_id}' не найдена")
 
 
-# Готовые хранилища под каждый файл
 teachers_store = JsonStore("teachers.json")
 subjects_store = JsonStore("subjects.json")
 classes_store = JsonStore("classes.json")

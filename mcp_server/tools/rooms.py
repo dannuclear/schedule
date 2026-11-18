@@ -1,6 +1,6 @@
 from mcp.server import MCPServer
 
-from JsonStore import rooms_store
+from data_access import rooms_store
 
 
 def register_tools(server: MCPServer) -> None:

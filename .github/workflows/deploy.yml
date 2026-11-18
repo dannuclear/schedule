@@ -70,7 +70,7 @@ jobs:
             rm -rf "$EXTRACT_DIR"
             mkdir -p "$EXTRACT_DIR"
             unzip -q "$ARCHIVE" -d "$EXTRACT_DIR"
-            test -f "$EXTRACT_DIR/mcp_server/server.py"
+            test -f "$EXTRACT_DIR/mcp_server/run.py"
 
             mkdir -p "$APP_DIR"
             NEW_DIR="$(mktemp -d "$APP_DIR/.mcp_server.XXXXXX")"

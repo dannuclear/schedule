@@ -8,7 +8,8 @@ from typing import Any
 
 from mcp.server import MCPServer
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
+from data_access.paths import DATA_DIR
+
 BASE_SCHEDULE_PATH = DATA_DIR / "base" / "schedule.json"
 WEEK_SCHEDULES_DIR = DATA_DIR / "weeks"
 DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")

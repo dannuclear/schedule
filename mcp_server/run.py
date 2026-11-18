@@ -4,12 +4,12 @@ from time import perf_counter
 
 from mcp.server import MCPServer
 from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
+from tools.classes import register_tools as register_class_tools
+from tools.rooms import register_tools as register_room_tools
+from tools.schedules import register_tools as register_schedule_tools
+from tools.subjects import register_tools as register_subject_tools
+from tools.teachers import register_tools as register_teachers_tools
 
-from classes import register_tools as register_class_tools
-from rooms import register_tools as register_room_tools
-from schedules import register_tools as register_schedule_tools
-from subjects import register_tools as register_subject_tools
-from teachers import register_tools as register_teachers_tools
 
 HOST = os.environ.get("MCP_HOST", "0.0.0.0")  # слушать на всех интерфейсах машины
 PORT = int(os.environ.get("MCP_PORT", "8200"))
