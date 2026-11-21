@@ -70,10 +70,17 @@ class JsonStore:
                 self.save(items)
                 return item
         raise ValueError(f"Запись с {self.id_field}='{item_id}' не найдена")
-
+    
+    def delete(self, item_id: str) -> dict[str, Any]:
+        items = self.load()
+        for index, item in enumerate(items):
+            if item.get(self.id_field) == item_id:
+                removed = items.pop(index)
+                self.save(items)
+                return removed
+        raise ValueError(f"Запись с {self.id_field}='{item_id}' не найдена")
 
 teachers_store = JsonStore("teachers.json")
 subjects_store = JsonStore("subjects.json")
 classes_store = JsonStore("classes.json")
-lessons_store = JsonStore("lessons.json")
 rooms_store = JsonStore("rooms.json")

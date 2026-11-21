@@ -9,6 +9,7 @@ from tools.rooms import register_tools as register_room_tools
 from tools.schedules import register_tools as register_schedule_tools
 from tools.subjects import register_tools as register_subject_tools
 from tools.teachers import register_tools as register_teachers_tools
+from tools.schedule_pdf import register_tools as register_pdf_tools
 
 
 HOST = os.environ.get("MCP_HOST", "0.0.0.0")  # слушать на всех интерфейсах машины
@@ -84,6 +85,7 @@ register_room_tools(server)
 register_subject_tools(server)
 register_class_tools(server)
 register_schedule_tools(server)
+register_pdf_tools(server)
 
 if __name__ == "__main__":
     server.run(transport="streamable-http", host=HOST, port=PORT)

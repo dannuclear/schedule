@@ -3,7 +3,6 @@
 from .json_store import (
     JsonStore,
     classes_store,
-    lessons_store,
     rooms_store,
     subjects_store,
     teachers_store,
@@ -12,7 +11,6 @@ from .json_store import (
 __all__ = [
     "JsonStore",
     "classes_store",
-    "lessons_store",
     "rooms_store",
     "subjects_store",
     "teachers_store",
