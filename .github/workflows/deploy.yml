@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Package MCP server
-        run: zip -r mcp-server.zip mcp_server -x '*/__pycache__/*'
+        run: zip -r mcp-server.zip mcp_server -x '*/__pycache__/*' 'mcp_server/data/*'
 
       - name: Upload MCP server archive
         uses: appleboy/scp-action@v1.0.0
@@ -50,14 +50,9 @@ jobs:
             ARCHIVE="$STAGING_DIR/mcp-server.zip"
             EXTRACT_DIR="$STAGING_DIR/extracted"
             SERVICE_NAME="schedule-mcp.service"
-            PREVIOUS_DIR="$APP_DIR/.mcp_server.previous"
-            NEW_DIR=""
 
             cleanup() {
               rm -rf "$STAGING_DIR"
-              if [ -n "$NEW_DIR" ]; then
-                rm -rf "$NEW_DIR"
-              fi
             }
             trap cleanup EXIT
 
@@ -72,40 +67,28 @@ jobs:
             unzip -q "$ARCHIVE" -d "$EXTRACT_DIR"
             test -f "$EXTRACT_DIR/mcp_server/run.py"
 
+            # Данные не копируем — они лежат в DATA_DIR и переживают деплой.
+            mkdir -p "$DATA_DIR"
             mkdir -p "$APP_DIR"
-            NEW_DIR="$(mktemp -d "$APP_DIR/.mcp_server.XXXXXX")"
-            chmod 755 "$NEW_DIR"
-            cp -a "$EXTRACT_DIR/mcp_server/." "$NEW_DIR/"
+
+            # Заменяем приложение целиком: старую версию удаляем.
+            rm -rf "$APP_DIR/mcp_server"
+            cp -a "$EXTRACT_DIR/mcp_server" "$APP_DIR/mcp_server"
+            chmod -R u+rwX "$APP_DIR/mcp_server"
 
             if [ ! -x "$APP_DIR/venv/bin/python" ]; then
               python3 -m venv "$APP_DIR/venv"
             fi
-            "$APP_DIR/venv/bin/python" -m pip install -r "$NEW_DIR/requirements.txt"
+            "$APP_DIR/venv/bin/python" -m pip install -r "$APP_DIR/mcp_server/requirements.txt"
 
-            rm -rf "$PREVIOUS_DIR"
-            if [ -d "$APP_DIR/mcp_server" ]; then
-              mv "$APP_DIR/mcp_server" "$PREVIOUS_DIR"
-            fi
-            mv "$NEW_DIR" "$APP_DIR/mcp_server"
-            NEW_DIR=""
-
+            # либо приложение читает SCHEDULE_DATA_DIR из окружения.
             sudo systemctl restart "$SERVICE_NAME" || true
 
             if ! healthy; then
-              echo "Service failed to start; restoring previous MCP server."
-              if [ -d "$PREVIOUS_DIR" ]; then
-                # Carry over any data written since the swap.
-                rm -rf "$APP_DIR/mcp_server"
-                mv "$PREVIOUS_DIR" "$APP_DIR/mcp_server"
-                sudo systemctl restart "$SERVICE_NAME" || true
-                if healthy; then
-                  echo "Previous version restored and running."
-                else
-                  echo "Previous version did NOT start either!"
-                fi
-              fi
+              echo "Service failed to start after deploy. Rollback is disabled by design." >&2
+              sudo systemctl status "$SERVICE_NAME" --no-pager || true
+              sudo journalctl -u "$SERVICE_NAME" -n 50 --no-pager || true
               exit 1
             fi
 
-            rm -rf "$PREVIOUS_DIR"
-            echo "MCP server deployed successfully."
+            echo "MCP server deployed successfully. Data dir: $DATA_DIR"
