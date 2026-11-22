@@ -91,4 +91,4 @@ jobs:
               exit 1
             fi
 
-            echo "MCP server deployed successfully. Data dir: $DATA_DIR"
+            echo "MCP server deployed successfully"
