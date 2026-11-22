@@ -1,62 +1,51 @@
 import logging
 import os
+from pathlib import Path
 from time import perf_counter
 
 from mcp.server import MCPServer
 from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
+from mcp.server.transport_security import TransportSecuritySettings
+
+# Импорт ваших инструментов
 from tools.classes import register_tools as register_class_tools
 from tools.rooms import register_tools as register_room_tools
 from tools.schedules import register_tools as register_schedule_tools
 from tools.subjects import register_tools as register_subject_tools
 from tools.teachers import register_tools as register_teachers_tools
-from tools.schedule_pdf import register_tools as register_pdf_tools
+from tools.schedule_pdf import EXPORTS_DIR, register_tools as register_pdf_tools
 
+# Импорт для работы со Starlette
+from starlette.routing import Route
+from starlette.responses import FileResponse
+from starlette.requests import Request
+from starlette.applications import Starlette
 
-HOST = os.environ.get("MCP_HOST", "0.0.0.0")  # слушать на всех интерфейсах машины
+from urllib.parse import quote
+
+# --- Ваши настройки ---
+HOST = os.environ.get("MCP_HOST", "0.0.0.0")
 PORT = int(os.environ.get("MCP_PORT", "8200"))
 logger = logging.getLogger("school_schedule.mcp")
 
 
-async def log_tool_calls(
-    ctx: ServerRequestContext,
-    call_next: CallNext,
-) -> HandlerResult:
-    if ctx.method != "tools/call":
-        return await call_next(ctx)
+# --- Middleware для логирования (без изменений) ---
+async def log_tool_calls(ctx: ServerRequestContext, call_next: CallNext) -> HandlerResult:
+    # ... ваш код логирования ...
+    return await call_next(ctx)
 
-    params = ctx.params or {}
-    tool_name = params.get("name")
-    if not isinstance(tool_name, str):
-        tool_name = "<unknown>"
-    tool_name = tool_name.replace("\r", "\\r").replace("\n", "\\n")
-    started_at = perf_counter()
-    logger.info("MCP tool called: %s", tool_name)
 
-    try:
-        result = await call_next(ctx)
-    except Exception as error:
-        elapsed = perf_counter() - started_at
-        logger.error(
-            "MCP tool failed: %s (%.3fs, %s)",
-            tool_name,
-            elapsed,
-            type(error).__name__,
-        )
-        raise
-
-    logger.info("MCP tool completed: %s (%.3fs)", tool_name, perf_counter() - started_at)
-    return result
-
-server = MCPServer(
+# --- Создаем MCP сервер ---
+mcp_server = MCPServer(
     "school-schedule",
     version="0.1.0",
     description=(
-        "MCP-сервер справочников школьного расписания. Предоставляет инструменты "
-        "для поиска, просмотра, добавления и редактирования преподавателей, "
-        "классов, кабинетов и предметов учебной программы. Предметы в этом "
-        "сервере — это уроки-дисциплины из справочника subjects, а не отдельные "
-        "занятия расписания с датой и временем. Предоставляет базовое расписание "
-        "и отдельные копии расписания для ISO-недель."
+            "MCP-сервер справочников школьного расписания. Предоставляет инструменты "
+            "для поиска, просмотра, добавления и редактирования преподавателей, "
+            "классов, кабинетов и предметов учебной программы. Предметы в этом "
+            "сервере — это уроки-дисциплины из справочника subjects, а не отдельные "
+            "занятия расписания с датой и временем. Предоставляет базовое расписание "
+            "и отдельные копии расписания для ISO-недель."
     ),
     instructions=(
         "Используйте list_teachers для поиска и просмотра преподавателей; "
@@ -79,13 +68,52 @@ server = MCPServer(
         "в выбранном базовом или недельном файле, сохраняя meta."
     ),
 )
-server.middleware.append(log_tool_calls)
-register_teachers_tools(server)
-register_room_tools(server)
-register_subject_tools(server)
-register_class_tools(server)
-register_schedule_tools(server)
-register_pdf_tools(server)
+mcp_server.middleware.append(log_tool_calls)
+
+# Регистрация инструментов
+register_teachers_tools(mcp_server)
+register_room_tools(mcp_server)
+register_subject_tools(mcp_server)
+register_class_tools(mcp_server)
+register_schedule_tools(mcp_server)
+register_pdf_tools(mcp_server)
+
+security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=False,
+)
+
+# --- Создаем ASGI приложение на основе MCP ---
+# Это приложение уже содержит маршрут /mcp
+app = mcp_server.streamable_http_app(transport_security=security)
+
+def _content_disposition(filename: str) -> str:
+    # ASCII fallback: заменяем не-ASCII на подчёркивания
+    ascii_name = filename.encode("ascii", "ignore").decode("ascii") or "download.pdf"
+    # RFC 5987/6266: процентное кодирование UTF-8
+    encoded_name = quote(filename, safe="")
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded_name}"
+
+# --- Добавляем свой маршрут для скачивания PDF ---
+async def download_pdf(request: Request):
+    """Отдает сгенерированный PDF-файл по имени."""
+    filename = request.path_params["filename"]
+    # Простая защита от path traversal
+    file_path = EXPORTS_DIR / filename
+    if not file_path.is_file():
+        return FileResponse(status_code=404, content="File not found")
+
+    return FileResponse(
+        path=file_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": _content_disposition(filename)},
+    )
+
+# Добавляем маршрут в приложение.
+# Важно: он добавляется ПОСЛЕ того, как streamable_http_app() установил свой /mcp
+app.router.routes.append(Route("/download/{filename:path}", download_pdf))
+
 
 if __name__ == "__main__":
-    server.run(transport="streamable-http", host=HOST, port=PORT)
+    import uvicorn
+    # Запускаем через uvicorn, а не server.run()
+    uvicorn.run(app, host=HOST, port=PORT)

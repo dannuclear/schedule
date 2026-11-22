@@ -1,6 +1,8 @@
 import base64
 import io
 from datetime import date as date_cls
+import os
+from pathlib import Path
 from typing import Any
 
 from mcp.server import MCPServer
@@ -20,8 +22,18 @@ from reportlab.platypus import (
 
 from data_access import rooms_store, subjects_store, teachers_store
 from data_access.schedule_store import ScheduleStore
+from data_access.paths import DATA_DIR, EXPORTS_DIR
 
 schedule_store = ScheduleStore()
+
+# Папка для готовых PDF. Лежит рядом с DATA_DIR, чтобы не смешивать
+# с исходными JSON. Можно вынести в отдельную переменную окружения.
+EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Публичный базовый URL, по которому Open WebUI сможет скачать файл.
+# Например, "http://192.168.1.10:8200". Если сервер и клиент на одной машине,
+# можно оставить пустым и возвращать относительный путь /download/...
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").rstrip("/")
 
 DAY_NAMES = {
     1: "Понедельник",
@@ -257,7 +269,7 @@ def register_tools(server: MCPServer) -> None:
         date: str | None = None,
         is_base: bool = False,
     ) -> dict:
-        """Сформировать PDF-расписание для одного класса.
+        """Сформировать PDF-расписание для одного класса и сохранить его на сервере.
 
         Args:
             class_id: идентификатор класса, например "10а" или "5б".
@@ -269,13 +281,12 @@ def register_tools(server: MCPServer) -> None:
         Возвращает объект:
             {
               "filename": "schedule-10а-2026-W36.pdf",
-              "mime": "application/pdf",
+              "url": "http://.../download/schedule-10а-2026-W36.pdf",
               "size": <bytes>,
-              "data_base64": "<...>",
               "source": "base" | "base_fallback" | "manual",
               "week": "2026-W36" | null,
             }
-        Клиент сохраняет data_base64 в файл .pdf.
+        По url файл можно скачать напрямую.
         """
         schedule = schedule_store.get(date, is_base)
         meta = schedule.get("meta", {})
@@ -314,11 +325,18 @@ def register_tools(server: MCPServer) -> None:
         else:
             filename = f"schedule-{class_id}-{date_cls.today().isoformat()}.pdf"
 
+        # Сохраняем PDF на диск
+        target_path = EXPORTS_DIR / filename
+        target_path.write_bytes(pdf_bytes)
+
+        # Формируем URL для скачивания
+        url_path = f"/download/{filename}"
+        url = f"{PUBLIC_BASE_URL}{url_path}" if PUBLIC_BASE_URL else url_path
+
         return {
             "filename": filename,
-            "mime": "application/pdf",
+            "url": url,
             "size": len(pdf_bytes),
-            "data_base64": base64.b64encode(pdf_bytes).decode("ascii"),
             "source": meta.get("source") or ("base" if is_base else "unknown"),
             "week": week,
         }

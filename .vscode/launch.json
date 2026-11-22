@@ -73,7 +73,12 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/mcp_server/run.py",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "env": {
+                "PUBLIC_BASE_URL": "http://localhost:8200",
+                "DATA_DIR": "${workspaceFolder}/mcp_server/data",
+                "EXPORTS_DIR": "${workspaceFolder}/out"
+            }
         },
         {
             "name": "Сводное (run.py)",
