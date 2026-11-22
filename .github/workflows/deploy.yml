@@ -68,7 +68,6 @@ jobs:
             test -f "$EXTRACT_DIR/mcp_server/run.py"
 
             # Данные не копируем — они лежат в DATA_DIR и переживают деплой.
-            mkdir -p "$DATA_DIR"
             mkdir -p "$APP_DIR"
 
             # Заменяем приложение целиком: старую версию удаляем.
