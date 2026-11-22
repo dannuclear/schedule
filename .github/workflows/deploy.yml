@@ -76,12 +76,6 @@ jobs:
             NEW_DIR="$(mktemp -d "$APP_DIR/.mcp_server.XXXXXX")"
             chmod 755 "$NEW_DIR"
             cp -a "$EXTRACT_DIR/mcp_server/." "$NEW_DIR/"
-            mkdir -p "$NEW_DIR/data"
-
-            # Keep JSON data that may have been changed by MCP tools on the server.
-            if [ -d "$APP_DIR/mcp_server/data" ]; then
-              cp -a "$APP_DIR/mcp_server/data/." "$NEW_DIR/data/"
-            fi
 
             if [ ! -x "$APP_DIR/venv/bin/python" ]; then
               python3 -m venv "$APP_DIR/venv"
@@ -101,7 +95,6 @@ jobs:
               echo "Service failed to start; restoring previous MCP server."
               if [ -d "$PREVIOUS_DIR" ]; then
                 # Carry over any data written since the swap.
-                cp -a "$APP_DIR/mcp_server/data/." "$PREVIOUS_DIR/data/" 2>/dev/null || true
                 rm -rf "$APP_DIR/mcp_server"
                 mv "$PREVIOUS_DIR" "$APP_DIR/mcp_server"
                 sudo systemctl restart "$SERVICE_NAME" || true
