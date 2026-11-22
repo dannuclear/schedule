@@ -15,29 +15,14 @@ from .metrics import teacher_rows
 from .model import ScheduleData
 
 
-def _fmt_slot_number(n: int, data: ScheduleData, lesson_time: str) -> str:
-    if lesson_time == "none":
-        return str(n)
-    s = data.slots_by_n.get(n) or {}
-    start = s.get("start")
-    end = s.get("end")
-    if not start and not end:
-        return str(n)
-    if start and end:
-        time_str = f"{start}–{end}"
-    else:
-        time_str = start or end
-    if lesson_time == "short":
-        return time_str
-    if lesson_time == "both":
-        return f"{n}\n{time_str}"
+def _fmt_slot_number(n: int) -> str:
     return str(n)
 
 
-def _classes_text(lessons: list[dict]) -> str:
+def _classes_text(schedule: list[dict]) -> str:
     """Уникальные классы через ' / ', в порядке появления."""
     out: list[str] = []
-    for les in lessons:
+    for les in schedule:
         for cc in les["classes"]:
             if cc not in out:
                 out.append(cc)
@@ -58,7 +43,6 @@ def build_teachers_table(data: ScheduleData,
                          days: list[int],
                          font_subj: float,
                          font: str, font_bold: str,
-                         lesson_time: str,
                          metrics: dict) -> Table:
     """
     Шапка двухуровневая:
@@ -66,7 +50,7 @@ def build_teachers_table(data: ScheduleData,
       низ:  пусто + [1..N] + [1..N] + …
     Тело: одна строка на преподавателя; в ячейке — только классы.
     """
-    slot_numbers = metrics.get("slots") or [s["n"] for s in data.slots]
+    slot_numbers = metrics.get("slots") or [1]
     n_slots = len(slot_numbers)
     n_days = len(days)
 
@@ -106,11 +90,11 @@ def build_teachers_table(data: ScheduleData,
         )]
         for day in days:
             for n in slot_numbers:
-                lessons = data.by_teacher.get((tid, day, n), [])
-                if not lessons:
+                schedule = data.by_teacher.get((tid, day, n), [])
+                if not schedule:
                     row.append("")
                     continue
-                text = _classes_text(lessons)
+                text = _classes_text(schedule)
                 row.append(_classes_paragraph(text, font, font_subj))
         rows.append(row)
         row_heights.append(row_h)

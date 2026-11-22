@@ -10,18 +10,16 @@ from dataclasses import dataclass, field
 @dataclass
 class ScheduleData:
     meta: dict
-    slots: list[dict]
     classes: list[dict]
     teachers: list[dict]
     rooms: list[dict]
     subjects: list[dict]
-    lessons: list[dict]
+    schedule: list[dict]
 
     classes_by_id: dict = field(default_factory=dict)
     teachers_by_id: dict = field(default_factory=dict)
     rooms_by_id: dict = field(default_factory=dict)
     subjects_by_id: dict = field(default_factory=dict)
-    slots_by_n: dict = field(default_factory=dict)
 
     by_class: dict = field(default_factory=lambda: defaultdict(list))
     by_teacher: dict = field(default_factory=lambda: defaultdict(list))
@@ -34,13 +32,12 @@ class ScheduleData:
         self.teachers_by_id = {t["id"]: t for t in self.teachers}
         self.rooms_by_id = {r["id"]: r for r in self.rooms}
         self.subjects_by_id = {s["id"]: s for s in self.subjects}
-        self.slots_by_n = {s["n"]: s for s in self.slots}
 
         self.by_class = defaultdict(list)
         self.by_teacher = defaultdict(list)
         self.by_room = defaultdict(list)
 
-        for les in self.lessons:
+        for les in self.schedule:
             key = (les["day"], les["slot"])
             for cid in les["classes"]:
                 self.by_class[(cid, *key)].append(les)
@@ -66,14 +63,14 @@ class ScheduleData:
 
         keep_ids = {c["id"] for c in self.classes if keep_grade(c["grade"])}
         self.classes = [c for c in self.classes if c["id"] in keep_ids]
-        self.lessons = [l for l in self.lessons
+        self.schedule = [l for l in self.schedule
                         if all(cid in keep_ids for cid in l["classes"])]
         self.build_indexes()
 
     def filter_by_day(self, day: int) -> None:
         if day <= 0:
             return
-        self.lessons = [l for l in self.lessons if l["day"] == day]
+        self.schedule = [l for l in self.schedule if l["day"] == day]
         self.build_indexes()
 
 
@@ -82,12 +79,11 @@ def load_schedule(path: str) -> ScheduleData:
         raw = json.load(f)
     data = ScheduleData(
         meta=raw["meta"],
-        slots=raw["slots"],
         classes=raw["classes"],
         teachers=raw["teachers"],
         rooms=raw["rooms"],
         subjects=raw["subjects"],
-        lessons=raw["lessons"],
+        schedule=raw["schedule"],
     )
     data.build_indexes()
     return data

@@ -182,7 +182,7 @@
     {"id": "x-prbio", "name": "ПрБио", "short": "ПрБио"},
     {"id": "x-prpr", "name": "ПрПр", "short": "ПрПр"}
   ],
-  "lessons": [
+  "schedule": [
     {"id": "mon-1-1а-rov", "day": 1, "slot": 1, "classes": ["1а"], "subjectId": "rov", "kind": "homeroom", "level": null, "parts": [{"teacherId": "safronova-el", "roomId": null}]},
     {"id": "mon-1-1б-rov", "day": 1, "slot": 1, "classes": ["1б"], "subjectId": "rov", "kind": "homeroom", "level": null, "parts": [{"teacherId": "fakova-ea", "roomId": null}]},
     {"id": "mon-1-1в-rov", "day": 1, "slot": 1, "classes": ["1в"], "subjectId": "rov", "kind": "homeroom", "level": null, "parts": [{"teacherId": "rymarchuk-mv", "roomId": null}]},

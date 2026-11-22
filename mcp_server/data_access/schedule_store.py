@@ -23,8 +23,8 @@ class ScheduleStore:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or not isinstance(data.get("meta"), dict):
             raise ValueError(f"Некорректная структура расписания в {path}")
-        if not isinstance(data.get("lessons"), list):
-            raise ValueError(f"В {path} поле lessons должно быть списком")
+        if not isinstance(data.get("schedule"), list):
+            raise ValueError(f"В {path} поле schedule должно быть списком")
         return data
 
     def _write(self, path: Path, schedule: dict[str, Any]) -> None:
@@ -67,7 +67,7 @@ class ScheduleStore:
         base = self._read(BASE_SCHEDULE_PATH)
         return {
             "meta": {**base["meta"], "week": week_path.parent.name, "source": "base_fallback"},
-            "lessons": base["lessons"],
+            "schedule": base["schedule"],
         }
 
     def get(self, schedule_date: str | None = None, is_base: bool = False) -> dict[str, Any]:
@@ -89,23 +89,23 @@ class ScheduleStore:
                 "basedOnBaseVersion": base["meta"].get("version"),
                 "source": "base",
             },
-            "lessons": base["lessons"],
+            "schedule": base["schedule"],
         }
         return week_path, week_schedule
 
-    def replace_lessons(
+    def replace_schedule(
         self,
-        lessons: list[dict[str, Any]],
+        schedule_items: list[dict[str, Any]],
         schedule_date: str | None = None,
         is_base: bool = False,
     ) -> dict[str, Any]:
         if is_base:
             schedule = self._read(BASE_SCHEDULE_PATH)
-            schedule["lessons"] = lessons
+            schedule["schedule"] = schedule_items
             self._write(BASE_SCHEDULE_PATH, schedule)
             return schedule
         week_path, schedule = self._materialize_week(schedule_date)
-        schedule["lessons"] = lessons
+        schedule["schedule"] = schedule_items
         schedule["meta"]["source"] = "manual"
         self._write(week_path, schedule)
         return schedule
@@ -121,15 +121,15 @@ class ScheduleStore:
 
     def add_lesson(self, lesson: dict[str, Any], schedule_date=None) -> dict[str, Any]:
         def mut(s):
-            if any(l.get("id") == lesson.get("id") for l in s["lessons"]):
+            if any(l.get("id") == lesson.get("id") for l in s["schedule"]):
                 raise ValueError(f"Урок с id='{lesson.get('id')}' уже есть в неделе")
-            s["lessons"].append(lesson)
+            s["schedule"].append(lesson)
             return s
         return self._mutate_week(schedule_date, mut)
 
     def update_lesson(self, lesson_id: str, changes: dict[str, Any], schedule_date=None) -> dict[str, Any]:
         def mut(s):
-            for lesson in s["lessons"]:
+            for lesson in s["schedule"]:
                 if lesson.get("id") == lesson_id:
                     lesson.update(changes)
                     return s
@@ -138,9 +138,9 @@ class ScheduleStore:
 
     def delete_lesson(self, lesson_id: str, schedule_date=None) -> dict[str, Any]:
         def mut(s):
-            for i, lesson in enumerate(s["lessons"]):
+            for i, lesson in enumerate(s["schedule"]):
                 if lesson.get("id") == lesson_id:
-                    s["lessons"].pop(i)
+                    s["schedule"].pop(i)
                     return s
             raise ValueError(f"Урок с id='{lesson_id}' не найден в неделе")
         return self._mutate_week(schedule_date, mut)

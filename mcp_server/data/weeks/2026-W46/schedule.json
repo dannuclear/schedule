@@ -5,7 +5,7 @@
     "source": "Все_исправленный.json",
     "version": 2
   },
-  "lessons": [
+  "schedule": [
     {
       "id": "mon-1-1а-rov",
       "day": 1,

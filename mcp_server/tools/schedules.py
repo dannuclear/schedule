@@ -2,8 +2,8 @@ from typing import Any
 
 from mcp.server import MCPServer
 
-from data_access import rooms_store, subjects_store, teachers_store
-from data_access.schedule_store import ScheduleStore
+from ..data_access import rooms_store, subjects_store, teachers_store
+from ..data_access.schedule_store import ScheduleStore
 
 LESSON_REQUIRED_FIELDS = {
     "id",
@@ -28,14 +28,14 @@ def _known_ids(store) -> set[str]:
     return {item.get("id") for item in store.load() if item.get("id")}
 
 
-def _validate_lessons(lessons: list[dict[str, Any]]) -> None:
+def _validate_schedule(schedule: list[dict[str, Any]]) -> None:
     seen_ids: set[str] = set()
 
     known_subjects = _known_ids(subjects_store)
     known_teachers = _known_ids(teachers_store)
     known_rooms = _known_ids(rooms_store)
 
-    for index, lesson in enumerate(lessons):
+    for index, lesson in enumerate(schedule):
         if not isinstance(lesson, dict):
             raise ValueError(f"Урок с индексом {index} должен быть объектом")
 
@@ -123,20 +123,20 @@ def register_tools(server: MCPServer) -> None:
                 вернуть базовое расписание с meta.source="base_fallback";
                 файл недели при этом не создаётся.
 
-        Результат содержит meta и полный массив lessons.
+        Результат содержит meta и полный массив schedule.
         """
         return schedule_store.get(date, is_base)
 
     @server.tool()
     def update_schedule(
-        lessons: list[dict[str, Any]],
+        schedule: list[dict[str, Any]],
         date: str | None = None,
         is_base: bool = False,
     ) -> dict:
-        """Заменить весь массив lessons в базовом или недельном расписании.
+        """Заменить весь массив schedule в базовом или недельном расписании.
 
         Args:
-            lessons: полный новый массив уроков; каждый объект должен содержать
+            schedule: полный новый массив уроков; каждый объект должен содержать
                 id, day, slot, classes, subjectId, kind, level и parts.
                 Ссылки subjectId/teacherId/roomId проверяются по справочникам.
             date: любая дата нужной недели в формате YYYY-MM-DD. Если пропущена,
@@ -145,10 +145,10 @@ def register_tools(server: MCPServer) -> None:
                 Иначе изменить расписание ISO-недели; при отсутствии файла недели
                 он создаётся один раз в момент записи.
 
-        Операция полностью заменяет список lessons и записывает файл атомарно.
+        Операция полностью заменяет список schedule и записывает файл атомарно.
         """
-        _validate_lessons(lessons)
-        return schedule_store.replace_lessons(lessons, date, is_base)
+        _validate_schedule(schedule)
+        return schedule_store.replace_schedule(schedule, date, is_base)
 
     @server.tool()
     def add_lesson(lesson: dict[str, Any], date: str | None = None) -> dict:
@@ -161,7 +161,7 @@ def register_tools(server: MCPServer) -> None:
         Если файла недели нет, он создаётся на основе базы, затем урок добавляется.
         id урока должен быть уникальным в пределах недели.
         """
-        _validate_lessons([lesson])
+        _validate_schedule([lesson])
         return schedule_store.add_lesson(lesson, date)
 
     @server.tool()
@@ -186,12 +186,12 @@ def register_tools(server: MCPServer) -> None:
         # чтобы update_lesson не мог записать невалидный урок.
         current = schedule_store.get_week(date)
         target = next(
-            (l for l in current["lessons"] if l.get("id") == id),
+            (l for l in current["schedule"] if l.get("id") == id),
             None,
         )
         if target is None:
             raise ValueError(f"Урок с id='{id}' не найден в неделе")
-        _validate_lessons([{**target, **changes}])
+        _validate_schedule([{**target, **changes}])
 
         return schedule_store.update_lesson(id, changes, date)
 

@@ -92,7 +92,7 @@ def _parallel_key(lesson: dict) -> tuple:
     )
 
 
-def cell_lines_for_lesson_group(lessons: list[dict], data: ScheduleData,
+def cell_lines_for_lesson_group(schedule: list[dict], data: ScheduleData,
                                 mode: str, cell_info: str) -> list[str]:
     """
     Две строки: [предметы, инфо].
@@ -101,7 +101,7 @@ def cell_lines_for_lesson_group(lessons: list[dict], data: ScheduleData,
     """
     groups: dict[tuple, list[dict]] = {}
     order: list[tuple] = []
-    for les in lessons:
+    for les in schedule:
         key = _parallel_key(les)
         if key not in groups:
             groups[key] = []

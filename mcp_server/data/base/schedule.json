@@ -1,6 +1,6 @@
 {
   "meta": {"title":"Расписание","term":"1 полугодие 2026-2027","source":"Все_исправленный.json","version":2},
-  "lessons": [
+  "schedule": [
     {"id":"mon-1-1а-rov","day":1,"slot":1,"classes":["1а"],"subjectId":"rov","kind":"homeroom","level":null,"parts":[{"teacherId":"safronova-el","roomId":null}]},
     {"id":"mon-1-1б-rov","day":1,"slot":1,"classes":["1б"],"subjectId":"rov","kind":"homeroom","level":null,"parts":[{"teacherId":"fakova-ea","roomId":null}]},
     {"id":"mon-1-1в-rov","day":1,"slot":1,"classes":["1в"],"subjectId":"rov","kind":"homeroom","level":null,"parts":[{"teacherId":"rymarchuk-mv","roomId":null}]},

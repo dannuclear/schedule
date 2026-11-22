@@ -1,6 +1,6 @@
 from mcp.server import MCPServer
 
-from data_access import teachers_store
+from ..data_access import teachers_store
 
 
 def register_tools(server: MCPServer) -> None:

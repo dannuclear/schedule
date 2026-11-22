@@ -61,8 +61,8 @@ def canvas_scale(canvas_name: str, orient_name: str) -> float:
 
 def used_slots(data: ScheduleData) -> list[int]:
     """Номера уроков, которые реально заняты в отфильтрованном наборе."""
-    slots = sorted({les["slot"] for les in data.lessons})
-    return slots or [s["n"] for s in data.slots[:1]] or [1]
+    slots = sorted({les["slot"] for les in data.schedule})
+    return slots or [1]
 
 
 def summary_columns(data: ScheduleData, view: str) -> list[dict]:
@@ -120,11 +120,11 @@ def content_extents(data: ScheduleData, view: str,
     for col in summary_columns(data, view):
         for day in days:
             for slot in slots:
-                lessons = lookup(col["id"], day, slot)
-                if not lessons:
+                schedule = lookup(col["id"], day, slot)
+                if not schedule:
                     continue
                 lines = cell_lines_for_lesson_group(
-                    lessons, data, view, cell_info)
+                    schedule, data, view, cell_info)
                 for i, line in enumerate(lines):
                     if not line:
                         continue
@@ -244,9 +244,9 @@ def teacher_rows(data: ScheduleData) -> list[str]:
 
 def _teachers_cell_text(data: ScheduleData, tid: str,
                         day: int, slot: int) -> str:
-    lessons = data.by_teacher.get((tid, day, slot), [])
+    schedule = data.by_teacher.get((tid, day, slot), [])
     seen: list[str] = []
-    for les in lessons:
+    for les in schedule:
         for cls in les["classes"]:
             if cls not in seen:
                 seen.append(cls)

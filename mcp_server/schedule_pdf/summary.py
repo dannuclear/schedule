@@ -18,25 +18,7 @@ from .metrics import (
 from .model import ScheduleData
 
 
-def format_slot_label(data: ScheduleData, slot_n: int,
-                      lesson_time: str) -> str:
-    if lesson_time == "none":
-        return str(slot_n)
-    s = data.slots_by_n.get(slot_n) or {}
-    start = s.get("start")
-    end = s.get("end")
-    if not start and not end:
-        return str(slot_n)
-    if start and end:
-        time_str = f"{start} – {end}"
-    elif start:
-        time_str = start
-    else:
-        time_str = end
-    if lesson_time == "short":
-        return time_str
-    if lesson_time == "both":
-        return f"{slot_n} · {time_str}"
+def format_slot_label(slot_n: int) -> str:
     return str(slot_n)
 
 
@@ -47,7 +29,6 @@ def build_summary(data: ScheduleData,
                   font_subj: float, font_info: float,
                   font: str, font_bold: str,
                   line_density: float,
-                  lesson_time: str,
                   cell_width_factor: float,
                   cell_height_factor: float,
                   metrics: dict | None = None
@@ -111,17 +92,17 @@ def build_summary(data: ScheduleData,
 
         # ---- строки уроков ----
         for slot in metrics["slots"]:
-            row: list = [format_slot_label(data, slot, lesson_time)]
+            row: list = [format_slot_label(slot)]
             keys_row: list = [None]
             for c in cols:
-                lessons = lookup(c["id"], day, slot)
-                if not lessons:
+                schedule = lookup(c["id"], day, slot)
+                if not schedule:
                     row.append("")
                     keys_row.append(None)
                     continue
 
                 lines = cell_lines_for_lesson_group(
-                    lessons, data, view, cell_info)
+                    schedule, data, view, cell_info)
                 row.append(cell_paragraph(
                     lines,
                     subj_size=font_subj,
@@ -133,7 +114,7 @@ def build_summary(data: ScheduleData,
                 # multi_class: True, если в клетке задействовано
                 # больше одного класса
                 total_classes: set[str] = set()
-                for les in lessons:
+                for les in schedule:
                     total_classes.update(les["classes"])
                 keys_row.append((lines, len(total_classes) > 1))
 

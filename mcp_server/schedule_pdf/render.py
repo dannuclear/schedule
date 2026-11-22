@@ -99,7 +99,6 @@ def generate_summary_pdf(data: ScheduleData, out_path: str,
                          font_subj: float, font_info: float,
                          font: str, font_bold: str,
                          line_density: float,
-                         lesson_time: str,
                          cell_width_factor: float,
                          cell_height_factor: float,
                          metrics: dict) -> str:
@@ -132,7 +131,6 @@ def generate_summary_pdf(data: ScheduleData, out_path: str,
     table = build_summary(
         data, canvas_name, canvas_orient, view, days, cell_info,
         font_subj, font_info, font, font_bold, line_density,
-        lesson_time,
         cell_width_factor, cell_height_factor,
         metrics=metrics,
     )
@@ -147,7 +145,6 @@ def generate_teachers_pdf(data: ScheduleData, out_path: str,
                           part_label: str | None, days: list[int],
                           font_subj: float,
                           font: str, font_bold: str,
-                          lesson_time: str,
                           metrics: dict) -> str:
     day_label = f" · {DAY_FULL[days[0]]}" if len(days) == 1 else ""
     title = (f"Расписание по преподавателям · "
@@ -175,7 +172,7 @@ def generate_teachers_pdf(data: ScheduleData, out_path: str,
     table = build_teachers_table(
         data, days,
         font_subj, font, font_bold,
-        lesson_time, metrics,
+        metrics,
     )
     story.append(table)
     doc.build(story)

@@ -1,6 +1,6 @@
 from mcp.server import MCPServer
 
-from data_access import subjects_store
+from ..data_access import subjects_store
 
 
 def register_tools(server: MCPServer) -> None:
