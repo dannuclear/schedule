@@ -1,7 +1,11 @@
 {
 	"mcpServers": {
-		"my-mcp-server-76e62687": {
+		"schedule_local": {
 			"url": "http://127.0.0.1:8200/mcp",
+			"type": "http"
+		},
+		"schedule_prod": {
+			"url": "http://nuclearius.ru:8200/mcp",
 			"type": "http"
 		}
 	}

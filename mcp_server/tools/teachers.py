@@ -1,6 +1,31 @@
 from mcp.server import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from ..data_access import teachers_store
+from ..data_access.schedule_store import ScheduleStore
+
+
+schedule_store = ScheduleStore()
+
+
+def _base_schedule_teacher_usage(teacher_id: str) -> list[dict]:
+    usage = []
+    for lesson in schedule_store.get_base()["schedule"]:
+        matching_parts = [
+            part
+            for part in lesson.get("parts", [])
+            if isinstance(part, dict) and part.get("teacherId") == teacher_id
+        ]
+        if matching_parts:
+            usage.append(
+                {
+                    "lessonId": lesson.get("id"),
+                    "day": lesson.get("day"),
+                    "slot": lesson.get("slot"),
+                    "classes": lesson.get("classes", []),
+                }
+            )
+    return usage
 
 
 def register_tools(server: MCPServer) -> None:
@@ -74,3 +99,37 @@ def register_tools(server: MCPServer) -> None:
             id,
             changes,
         )
+
+    @server.tool()
+    def delete_teacher(id: str) -> dict:
+        """Удалить преподавателя из справочника, если он не используется в базовом расписании.
+
+        Args:
+            id: идентификатор преподавателя.
+
+        Сначала проверяется базовое расписание. Если преподаватель встречается хотя бы
+        в одном уроке, удаление отклоняется и возвращается описание использующих уроков.
+        """
+        teacher_id = id.strip()
+        if not teacher_id:
+            raise ToolError("id должен быть непустой строкой")
+
+        try:
+            teachers_store.require_by_id(teacher_id)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+
+        usage = _base_schedule_teacher_usage(teacher_id)
+        if usage:
+            lesson_ids = ", ".join(
+                str(item["lessonId"]) for item in usage if item["lessonId"]
+            )
+            raise ToolError(
+                f"Преподаватель '{teacher_id}' используется в базовом расписании "
+                f"в уроках: {lesson_ids or 'без указания id'}"
+            )
+
+        try:
+            return teachers_store.delete(teacher_id)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc

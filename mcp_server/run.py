@@ -65,6 +65,7 @@ mcp_server = MCPServer(
         "Для PDF используйте generate_schedule_pdf для одного класса или "
         "generate_summary_schedule_pdf для сводной таблицы с фильтрами part и day и видом view "
         "classes, teachers или rooms. Результат содержит filename, path, url и size готового PDF."
+        "при запросах расписания выдавай по умолчанию PDF если не уточнено другого"
     ),
 )
 mcp_server.middleware.append(log_tool_calls)
