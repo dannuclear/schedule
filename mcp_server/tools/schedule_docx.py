@@ -1,6 +1,7 @@
 """MCP tool for exporting selected classes' daily schedule to DOCX."""
 
 import hashlib
+from datetime import date
 from io import BytesIO
 from typing import Any
 
@@ -13,7 +14,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 from mcp.server import MCPServer
 
-from ..data_access import classes_store, rooms_store, subjects_store, teachers_store
+from ..data_access import classes_store, subjects_store
 from ..data_access.paths import EXPORTS_DIR
 from ..data_access.schedule_store import ScheduleStore
 
@@ -27,7 +28,23 @@ DAY_NAMES = {
     7: "Воскресенье",
 }
 
-TABLE_WIDTHS_CM = (2.2, 1.4, 5.0, 12.0, 6.0)
+MONTH_NAMES = {
+    1: "января",
+    2: "февраля",
+    3: "марта",
+    4: "апреля",
+    5: "мая",
+    6: "июня",
+    7: "июля",
+    8: "августа",
+    9: "сентября",
+    10: "октября",
+    11: "ноября",
+    12: "декабря",
+}
+
+PAGE_CONTENT_WIDTH_CM = 27.3
+LESSON_COLUMN_WIDTH_CM = 1.5
 
 schedule_store = ScheduleStore()
 
@@ -38,53 +55,41 @@ def _label(record: dict[str, Any] | None, fallback: str) -> str:
     return record.get("short") or record.get("name") or fallback
 
 
-def _lesson_cells(
+def _lesson_text(
     lesson: dict[str, Any],
     subjects: dict[str, dict[str, Any]],
-    teachers: dict[str, dict[str, Any]],
-    rooms: dict[str, dict[str, Any]],
-) -> tuple[str, str, str]:
+) -> str:
     subject_id = lesson.get("subjectId")
     subject = _label(subjects.get(subject_id), subject_id or "—")
     parts = lesson.get("parts") or []
-    teacher_labels = []
-    room_labels = []
-
-    for part in parts:
-        group_prefix = (
-            f"Группа {part['group']}: "
-            if len(parts) > 1 and part.get("group") is not None
-            else ""
+    room_ids = list(
+        dict.fromkeys(
+            str(part["roomId"])
+            for part in parts
+            if part.get("roomId") not in (None, "")
         )
-        teacher_id = part.get("teacherId")
-        teacher_labels.append(
-            group_prefix + _label(teachers.get(teacher_id), teacher_id or "—")
-        )
+    )
+    return f"{subject} {'/'.join(room_ids)}".rstrip()
 
-        room_id = part.get("roomId")
-        if room_id:
-            room_labels.append(
-                group_prefix + _label(rooms.get(room_id), room_id)
-            )
 
-    return subject, "\n".join(teacher_labels), "\n".join(room_labels)
+def _shade_cell(cell: Any, fill: str) -> None:
+    properties = cell._tc.get_or_add_tcPr()
+    shading = OxmlElement("w:shd")
+    shading.set(qn("w:fill"), fill)
+    properties.append(shading)
 
 
 def build_day_schedule_docx(
     schedule: dict[str, Any],
-    year: int | None,
-    week: int | None,
+    year: int,
+    week: int,
     day: int,
     class_ids: list[str],
-    class_names: dict[str, str],
     subjects: dict[str, dict[str, Any]],
-    teachers: dict[str, dict[str, Any]],
-    rooms: dict[str, dict[str, Any]],
-    is_base: bool,
 ) -> bytes:
-    if not is_base and (year is None or week is None):
-        raise ValueError("Для недельного расписания необходимо указать year и week")
-
+    if not class_ids:
+        raise ValueError("class_ids должен содержать хотя бы один id класса")
+    calendar_date = date.fromisocalendar(year, week, day)
     document = Document()
     section = document.sections[0]
     section.orientation = WD_ORIENT.LANDSCAPE
@@ -95,26 +100,30 @@ def build_day_schedule_docx(
     section.left_margin = Cm(1.2)
     section.right_margin = Cm(1.2)
 
-    title_prefix = "Базовое расписание" if is_base else "Расписание"
     title = document.add_heading(
-        f"{title_prefix} — {DAY_NAMES[day]}", level=1
+        f"РАСПИСАНИЕ НА {calendar_date.day} "
+        f"{MONTH_NAMES[calendar_date.month]} ({DAY_NAMES[day].lower()})",
+        level=1,
     )
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if is_base:
-        document.add_paragraph("Источник: базовое расписание")
-    else:
-        document.add_paragraph(f"ISO-неделя: {year}-W{week:02d}")
-    document.add_paragraph(
-        "Классы: " + ", ".join(class_names[class_id] for class_id in class_ids)
-    )
 
-    table = document.add_table(rows=1, cols=5)
+    table = document.add_table(rows=1, cols=len(class_ids) + 1)
     table.style = "Table Grid"
-    headers = ("Класс", "Урок", "Предмет", "Учитель", "Кабинет")
+    table.autofit = False
+    class_column_width = (
+        PAGE_CONTENT_WIDTH_CM - LESSON_COLUMN_WIDTH_CM
+    ) / len(class_ids)
+    table.columns[0].width = Cm(LESSON_COLUMN_WIDTH_CM)
+    for column_index in range(1, len(class_ids) + 1):
+        table.columns[column_index].width = Cm(class_column_width)
+
+    headers = ("Урок", *class_ids)
     for cell, header in zip(table.rows[0].cells, headers):
         cell.text = header
         cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        _shade_cell(cell, "D9D9D9")
         for paragraph in cell.paragraphs:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             for run in paragraph.runs:
                 run.bold = True
                 run.font.size = Pt(9)
@@ -124,41 +133,71 @@ def build_day_schedule_docx(
     repeated_header.set(qn("w:val"), "true")
     header_properties.append(repeated_header)
 
-    lessons = schedule.get("schedule", [])
-    for class_id in class_ids:
-        class_lessons = sorted(
-            (
-                lesson for lesson in lessons
-                if class_id in (lesson.get("classes") or [])
-            ),
-            key=lambda lesson: (lesson.get("slot", 0), lesson.get("id", "")),
-        )
-        if not class_lessons:
-            values = [class_names[class_id], "—", "Нет уроков", "", ""]
-            row = table.add_row()
-            for cell, value in zip(row.cells, values):
-                cell.text = value
-        else:
-            for lesson in class_lessons:
-                subject, teacher, room = _lesson_cells(
-                    lesson, subjects, teachers, rooms
+    lessons = [
+        lesson
+        for lesson in schedule.get("schedule", [])
+        if lesson.get("day") == day
+    ]
+    for slot in range(1, 10):
+        lessons_by_class = {class_id: [] for class_id in class_ids}
+        for lesson in lessons:
+            if lesson.get("slot") != slot:
+                continue
+            for class_id in class_ids:
+                if class_id in (lesson.get("classes") or []):
+                    lessons_by_class[class_id].append(lesson)
+
+        row = table.add_row()
+        row.cells[0].text = str(slot)
+        _shade_cell(row.cells[0], "D9D9D9")
+        for paragraph in row.cells[0].paragraphs:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        merge_ranges = []
+        class_index = 0
+        while class_index < len(class_ids):
+            class_lessons = lessons_by_class[class_ids[class_index]]
+            signature = tuple(
+                sorted(str(lesson.get("id", "")) for lesson in class_lessons)
+            )
+            end_index = class_index
+            while end_index + 1 < len(class_ids):
+                next_lessons = lessons_by_class[class_ids[end_index + 1]]
+                next_signature = tuple(
+                    sorted(str(lesson.get("id", "")) for lesson in next_lessons)
                 )
-                values = [
-                    class_names[class_id],
-                    str(lesson["slot"]),
-                    subject,
-                    teacher,
-                    room,
-                ]
-                row = table.add_row()
-                for cell, value in zip(row.cells, values):
-                    cell.text = value
+                if next_signature != signature:
+                    break
+                end_index += 1
+
+            if end_index > class_index and signature and all(
+                all(
+                    class_id in (lesson.get("classes") or [])
+                    for class_id in class_ids[class_index : end_index + 1]
+                )
+                for lesson in class_lessons
+            ):
+                merge_ranges.append((class_index, end_index))
+            class_index = end_index + 1
+
+        merged_starts = {start: end for start, end in merge_ranges}
+        class_index = 0
+        while class_index < len(class_ids):
+            end_index = merged_starts.get(class_index, class_index)
+            cell = row.cells[class_index + 1]
+            if end_index > class_index:
+                cell = cell.merge(row.cells[end_index + 1])
+            cell.text = "\n".join(
+                _lesson_text(lesson, subjects)
+                for lesson in lessons_by_class[class_ids[class_index]]
+            )
+            class_index = end_index + 1
 
     for row in table.rows:
-        for cell, width in zip(row.cells, TABLE_WIDTHS_CM):
-            cell.width = Cm(width)
+        for cell in row.cells:
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
             for paragraph in cell.paragraphs:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 paragraph.paragraph_format.space_after = Pt(0)
                 for run in paragraph.runs:
                     run.font.size = Pt(9)
@@ -173,8 +212,8 @@ def register_tools(server: MCPServer) -> None:
     def generate_day_schedule_docx(
         day: int,
         classes: list[str],
-        year: int | None = None,
-        week: int | None = None,
+        year: int,
+        week: int,
         is_base: bool = False,
     ) -> dict[str, Any]:
         """Создать DOCX-таблицу расписания выбранных классов за один день.
@@ -182,13 +221,11 @@ def register_tools(server: MCPServer) -> None:
         Args:
             day: день недели от 1 (понедельник) до 7 (воскресенье).
             classes: непустой список id классов, например ["5а", "6б"].
-            year: ISO-год расписания; обязателен для недельного режима.
-            week: номер ISO-недели от 1 до 53; обязателен для недельного режима.
+            year: ISO-год, используемый для определения даты в заголовке.
+            week: номер ISO-недели от 1 до 53 для определения даты в заголовке.
             is_base: если true, сформировать документ по базовому расписанию;
-                в этом режиме year и week не требуются.
+                year и week при этом нужны только для даты в заголовке.
         """
-        if not is_base and (year is None or week is None):
-            raise ValueError("Для недельного расписания необходимо указать year и week")
         if not classes:
             raise ValueError("classes должен содержать хотя бы один id класса")
         if any(
@@ -216,31 +253,21 @@ def register_tools(server: MCPServer) -> None:
             day=day,
             is_base=is_base,
         )
-        class_names = {
-            class_id: class_records[class_id].get("name") or class_id
-            for class_id in selected_classes
-        }
         subjects = {item["id"]: item for item in subjects_store.load()}
-        teachers = {item["id"]: item for item in teachers_store.load()}
-        rooms = {item["id"]: item for item in rooms_store.load()}
         document_bytes = build_day_schedule_docx(
             schedule,
             year,
             week,
             day,
             selected_classes,
-            class_names,
             subjects,
-            teachers,
-            rooms,
-            is_base,
         )
 
         class_hash = hashlib.sha256(
             "\0".join(selected_classes).encode("utf-8")
         ).hexdigest()[:10]
         schedule_label = (
-            "base" if is_base else f"{year}-W{week:02d}"
+            f"base-{year}-W{week:02d}" if is_base else f"{year}-W{week:02d}"
         )
         filename = f"schedule-{schedule_label}-day-{day}-{class_hash}.docx"
         target = EXPORTS_DIR / filename
@@ -252,8 +279,8 @@ def register_tools(server: MCPServer) -> None:
             "path": str(target),
             "url": f"/download/{filename}",
             "size": len(document_bytes),
-            "year": None if is_base else year,
-            "week": None if is_base else week,
+            "year": year,
+            "week": week,
             "day": day,
             "classes": selected_classes,
             "isBase": is_base,
