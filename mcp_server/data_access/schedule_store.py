@@ -267,6 +267,14 @@ class ScheduleStore:
             week_path, "base", include_base_version=True
         )
 
+    def delete_week(self, week: int, year: int) -> Path:
+        """Удалить только файл выбранной недельной копии, не затрагивая базу."""
+        week_path = self._week_path(week, year)
+        if not week_path.is_file():
+            raise ValueError(f"Файл недельного расписания не найден: {week_path}")
+        week_path.unlink()
+        return week_path
+
     def replace_schedule(
         self,
         schedule_items: list[dict[str, Any]],
