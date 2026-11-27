@@ -1,12 +1,21 @@
 # data_access/schedule_store.py
+import copy
 import json
 import os
 import tempfile
-from datetime import date
+from collections.abc import Callable
+from datetime import date, datetime, timezone
 from pathlib import Path
+from time import time_ns
 from typing import Any
 
-from .paths import BASE_SCHEDULE_PATH, WEEK_SCHEDULES_DIR
+from .paths import (
+    BASE_SCHEDULE_BACKUPS_DIR,
+    BASE_SCHEDULE_PATH,
+    WEEK_SCHEDULES_DIR,
+)
+
+BASE_SCHEDULE_BACKUP_LIMIT = 10
 
 
 class ScheduleStore:
@@ -45,102 +54,357 @@ class ScheduleStore:
                 os.unlink(tmp)
 
     @staticmethod
-    def _week_path(schedule_date: str | None) -> Path:
-        if schedule_date is None:
-            requested = date.today()
-        else:
-            requested = date.fromisoformat(schedule_date)  # ValueError сам по себе
-        iso_year, iso_week, _ = requested.isocalendar()
-        return WEEK_SCHEDULES_DIR / f"{iso_year}-W{iso_week:02d}" / "schedule.json"
+    def _week_path(week: int | None = None, year: int | None = None) -> Path:
+        if week is None and year is None:
+            year, week, _ = date.today().isocalendar()
+        if week is None or year is None:
+            raise ValueError("week и year нужно указывать вместе")
+        if (
+            isinstance(week, bool)
+            or not isinstance(week, int)
+            or isinstance(year, bool)
+            or not isinstance(year, int)
+        ):
+            raise ValueError("week и year должны быть целыми числами")
+        try:
+            date.fromisocalendar(year, week, 1)
+        except ValueError as error:
+            raise ValueError(
+                "year и week должны обозначать существующую ISO-неделю"
+            ) from error
+        return WEEK_SCHEDULES_DIR / f"{year}-W{week:02d}" / "schedule.json"
+
+    @staticmethod
+    def _filter_day(
+        schedule: dict[str, Any], day: int | None
+    ) -> dict[str, Any]:
+        if day is None:
+            return schedule
+        return {
+            **schedule,
+            "schedule": [
+                lesson for lesson in schedule["schedule"] if lesson.get("day") == day
+            ],
+        }
+
+    @staticmethod
+    def _validate_day(day: int | None) -> None:
+        if day is not None and (
+            isinstance(day, bool) or not isinstance(day, int) or not 1 <= day <= 7
+        ):
+            raise ValueError("day должен быть целым числом от 1 до 7")
+
+    def _schedule_from_base(
+        self, week_path: Path, source: str, include_base_version: bool = False
+    ) -> dict[str, Any]:
+        base = self._read(BASE_SCHEDULE_PATH)
+        meta = {
+            **base["meta"],
+            "week": week_path.parent.name,
+            "source": source,
+        }
+        if include_base_version:
+            meta["basedOnBaseVersion"] = base["meta"].get("version")
+        return {"meta": meta, "schedule": base["schedule"]}
 
     # ---- чтение ----
 
-    def get_base(self) -> dict[str, Any]:
-        return self._read(BASE_SCHEDULE_PATH)
+    def get_base(self, day: int | None = None) -> dict[str, Any]:
+        self._validate_day(day)
+        return self._filter_day(self._read(BASE_SCHEDULE_PATH), day)
 
-    def get_week(self, schedule_date: str | None = None) -> dict[str, Any]:
+    def get_week(
+        self,
+        week: int | None = None,
+        year: int | None = None,
+        day: int | None = None,
+    ) -> dict[str, Any]:
         """Вернуть неделю. Если файла недели нет — вернуть базу
         с пометкой source='base_fallback', НЕ создавая файл."""
-        week_path = self._week_path(schedule_date)
+        self._validate_day(day)
+        week_path = self._week_path(week, year)
         if week_path.exists():
-            return self._read(week_path)
-        base = self._read(BASE_SCHEDULE_PATH)
-        return {
-            "meta": {**base["meta"], "week": week_path.parent.name, "source": "base_fallback"},
-            "schedule": base["schedule"],
-        }
+            schedule = self._read(week_path)
+        else:
+            schedule = self._schedule_from_base(week_path, "base_fallback")
+        return self._filter_day(schedule, day)
 
-    def get(self, schedule_date: str | None = None, is_base: bool = False) -> dict[str, Any]:
-        return self.get_base() if is_base else self.get_week(schedule_date)
+    def get(
+        self,
+        week: int | None = None,
+        year: int | None = None,
+        is_base: bool = False,
+        day: int | None = None,
+    ) -> dict[str, Any]:
+        return self.get_base(day) if is_base else self.get_week(week, year, day)
+
+    @staticmethod
+    def _find_lesson(
+        schedule: dict[str, Any], lesson_id: str
+    ) -> dict[str, Any] | None:
+        return next(
+            (lesson for lesson in schedule["schedule"] if lesson.get("id") == lesson_id),
+            None,
+        )
+
+    def get_lesson_by_id(
+        self,
+        lesson_id: str,
+        week: int | None = None,
+        year: int | None = None,
+        is_base: bool = False,
+    ) -> dict[str, Any] | None:
+        """Вернуть урок из базы или выбранной недели; если не найден, вернуть None."""
+        schedule = (
+            self.get_base()
+            if is_base
+            else self.get_week(week=week, year=year)
+        )
+        return self._find_lesson(schedule, lesson_id)
+
+    @staticmethod
+    def _lesson_resources(lesson: dict[str, Any], key: str) -> set[str]:
+        parts = lesson.get("parts", [])
+        if not isinstance(parts, list):
+            raise ValueError(f"Урок {lesson.get('id')}: parts должен быть списком")
+
+        resources = set()
+        for part in parts:
+            if not isinstance(part, dict):
+                raise ValueError(
+                    f"Урок {lesson.get('id')}: элемент parts должен быть объектом"
+                )
+            value = part.get(key)
+            if value is not None and value != "":
+                if not isinstance(value, str):
+                    raise ValueError(
+                        f"Урок {lesson.get('id')}: {key} должен быть строкой или null"
+                    )
+                resources.add(value)
+        return resources
+
+    @classmethod
+    def _conflicts_between(
+        cls, first: dict[str, Any], second: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        if (first.get("day"), first.get("slot")) != (
+            second.get("day"),
+            second.get("slot"),
+        ):
+            return []
+
+        conflicts = []
+        for resource_type, key in (("teacher", "teacherId"), ("room", "roomId")):
+            shared_resources = cls._lesson_resources(
+                first, key
+            ) & cls._lesson_resources(second, key)
+            conflicts.extend(
+                {
+                    "type": resource_type,
+                    "resourceId": resource_id,
+                    "day": first.get("day"),
+                    "slot": first.get("slot"),
+                    "lessonIds": [first.get("id"), second.get("id")],
+                }
+                for resource_id in sorted(shared_resources)
+            )
+        return conflicts
+
+    @classmethod
+    def find_conflicts(
+        cls, schedule: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Return simultaneous teacher and room conflicts."""
+        lessons_by_slot: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
+        conflicts = []
+        for lesson in schedule:
+            slot = (lesson.get("day"), lesson.get("slot"))
+            for existing in lessons_by_slot.get(slot, []):
+                conflicts.extend(cls._conflicts_between(existing, lesson))
+            lessons_by_slot.setdefault(slot, []).append(lesson)
+        return conflicts
+
+    @classmethod
+    def _ensure_no_new_conflicts(
+        cls,
+        schedule: list[dict[str, Any]],
+        lesson: dict[str, Any],
+        ignored_lesson_id: str | None = None,
+    ) -> None:
+        conflicts = []
+        for existing in schedule:
+            if existing.get("id") == ignored_lesson_id:
+                continue
+            conflicts.extend(cls._conflicts_between(existing, lesson))
+        if conflicts:
+            raise ValueError(
+                "Изменение создаёт конфликт занятости: "
+                + json.dumps(conflicts, ensure_ascii=False)
+            )
+
+    @staticmethod
+    def _raise_on_conflicts(schedule: list[dict[str, Any]]) -> None:
+        conflicts = ScheduleStore.find_conflicts(schedule)
+        if conflicts:
+            raise ValueError(
+                "Расписание содержит конфликт занятости: "
+                + json.dumps(conflicts, ensure_ascii=False)
+            )
 
     # ---- запись ----
 
-    def _materialize_week(self, schedule_date: str | None) -> tuple[Path, dict[str, Any]]:
+    def _materialize_week(
+        self, week: int | None = None, year: int | None = None
+    ) -> tuple[Path, dict[str, Any]]:
         """Вернуть (путь_недели, содержимое). Если недели нет — берём базу
         и готовим meta недели (файл НЕ пишем здесь)."""
-        week_path = self._week_path(schedule_date)
+        week_path = self._week_path(week, year)
         if week_path.exists():
             return week_path, self._read(week_path)
-        base = self._read(BASE_SCHEDULE_PATH)
-        week_schedule = {
-            "meta": {
-                **base["meta"],
-                "week": week_path.parent.name,
-                "basedOnBaseVersion": base["meta"].get("version"),
-                "source": "base",
-            },
-            "schedule": base["schedule"],
-        }
-        return week_path, week_schedule
+        return week_path, self._schedule_from_base(
+            week_path, "base", include_base_version=True
+        )
 
     def replace_schedule(
         self,
         schedule_items: list[dict[str, Any]],
-        schedule_date: str | None = None,
+        week: int | None = None,
+        year: int | None = None,
         is_base: bool = False,
     ) -> dict[str, Any]:
-        if is_base:
-            schedule = self._read(BASE_SCHEDULE_PATH)
+        self._raise_on_conflicts(schedule_items)
+
+        def mut(schedule: dict[str, Any]) -> dict[str, Any]:
             schedule["schedule"] = schedule_items
-            self._write(BASE_SCHEDULE_PATH, schedule)
             return schedule
-        week_path, schedule = self._materialize_week(schedule_date)
-        schedule["schedule"] = schedule_items
-        schedule["meta"]["source"] = "manual"
-        self._write(week_path, schedule)
-        return schedule
+
+        return self._mutate_schedule(week, year, is_base, mut)
 
     # ---- точечные операции (для недели) ----
 
-    def _mutate_week(self, schedule_date, mutator) -> dict[str, Any]:
-        week_path, schedule = self._materialize_week(schedule_date)
+    def _mutate_week(
+        self,
+        week: int | None,
+        year: int | None,
+        mutator: Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> dict[str, Any]:
+        week_path, schedule = self._materialize_week(week, year)
         schedule = mutator(schedule)
         schedule["meta"]["source"] = "manual"
         self._write(week_path, schedule)
         return schedule
 
-    def add_lesson(self, lesson: dict[str, Any], schedule_date=None) -> dict[str, Any]:
-        def mut(s):
-            if any(l.get("id") == lesson.get("id") for l in s["schedule"]):
-                raise ValueError(f"Урок с id='{lesson.get('id')}' уже есть в неделе")
-            s["schedule"].append(lesson)
-            return s
-        return self._mutate_week(schedule_date, mut)
+    def _backup_base(self, schedule: dict[str, Any]) -> None:
+        BASE_SCHEDULE_BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        backup_path = (
+            BASE_SCHEDULE_BACKUPS_DIR
+            / f"schedule-{timestamp}-{time_ns()}.json"
+        )
+        self._write(backup_path, schedule)
 
-    def update_lesson(self, lesson_id: str, changes: dict[str, Any], schedule_date=None) -> dict[str, Any]:
-        def mut(s):
-            for lesson in s["schedule"]:
-                if lesson.get("id") == lesson_id:
-                    lesson.update(changes)
-                    return s
-            raise ValueError(f"Урок с id='{lesson_id}' не найден в неделе")
-        return self._mutate_week(schedule_date, mut)
+        backups = sorted(
+            BASE_SCHEDULE_BACKUPS_DIR.glob("schedule-*.json"),
+            key=lambda path: path.name,
+            reverse=True,
+        )
+        for old_backup in backups[BASE_SCHEDULE_BACKUP_LIMIT:]:
+            old_backup.unlink()
 
-    def delete_lesson(self, lesson_id: str, schedule_date=None) -> dict[str, Any]:
-        def mut(s):
-            for i, lesson in enumerate(s["schedule"]):
-                if lesson.get("id") == lesson_id:
-                    s["schedule"].pop(i)
-                    return s
-            raise ValueError(f"Урок с id='{lesson_id}' не найден в неделе")
-        return self._mutate_week(schedule_date, mut)
+    def rollback_base_schedule(self) -> tuple[dict[str, Any], str]:
+        """Restore the newest saved backup without creating another backup."""
+        current_schedule = self._read(BASE_SCHEDULE_PATH)
+        backups = sorted(
+            BASE_SCHEDULE_BACKUPS_DIR.glob("schedule-*.json"),
+            key=lambda path: path.name,
+            reverse=True,
+        )
+        if not backups:
+            raise ValueError("Резервные копии базового расписания отсутствуют")
+
+        backup_path = backups[0]
+        backup = self._read(backup_path)
+        if backup == current_schedule:
+            raise ValueError(
+                "Текущее базовое расписание уже совпадает с последней резервной копией"
+            )
+        self._write(BASE_SCHEDULE_PATH, backup)
+        return backup, backup_path.name
+
+    def _mutate_base(
+        self, mutator: Callable[[dict[str, Any]], dict[str, Any]]
+    ) -> dict[str, Any]:
+        schedule = self._read(BASE_SCHEDULE_PATH)
+        backup_snapshot = copy.deepcopy(schedule)
+        updated_schedule = mutator(schedule)
+        self._backup_base(backup_snapshot)
+        self._write(BASE_SCHEDULE_PATH, updated_schedule)
+        return updated_schedule
+
+    def _mutate_schedule(
+        self,
+        week: int | None,
+        year: int | None,
+        is_base: bool,
+        mutator: Callable[[dict[str, Any]], dict[str, Any]],
+    ) -> dict[str, Any]:
+        if is_base:
+            return self._mutate_base(mutator)
+        return self._mutate_week(week, year, mutator)
+
+    def add_lesson(
+        self,
+        lesson: dict[str, Any],
+        week: int | None = None,
+        year: int | None = None,
+        is_base: bool = False,
+    ) -> dict[str, Any]:
+        lesson_id = lesson.get("id")
+
+        def mut(schedule: dict[str, Any]) -> dict[str, Any]:
+            if self._find_lesson(schedule, lesson_id) is not None:
+                raise ValueError(f"Урок с id='{lesson_id}' уже есть в неделе")
+            self._ensure_no_new_conflicts(schedule["schedule"], lesson)
+            schedule["schedule"].append(lesson)
+            return schedule
+
+        return self._mutate_schedule(week, year, is_base, mut)
+
+    def update_lesson(
+        self,
+        lesson_id: str,
+        changes: dict[str, Any],
+        week: int | None = None,
+        year: int | None = None,
+        is_base: bool = False,
+    ) -> dict[str, Any]:
+        def mut(schedule: dict[str, Any]) -> dict[str, Any]:
+            lesson = self._find_lesson(schedule, lesson_id)
+            if lesson is None:
+                raise ValueError(f"Урок с id='{lesson_id}' не найден в неделе")
+            updated_lesson = {**lesson, **changes}
+            self._ensure_no_new_conflicts(
+                schedule["schedule"],
+                updated_lesson,
+                ignored_lesson_id=lesson_id,
+            )
+            lesson.update(changes)
+            return schedule
+
+        return self._mutate_schedule(week, year, is_base, mut)
+
+    def delete_lesson(
+        self,
+        lesson_id: str,
+        week: int | None = None,
+        year: int | None = None,
+        is_base: bool = False,
+    ) -> dict[str, Any]:
+        def mut(schedule: dict[str, Any]) -> dict[str, Any]:
+            lesson = self._find_lesson(schedule, lesson_id)
+            if lesson is None:
+                raise ValueError(f"Урок с id='{lesson_id}' не найден в неделе")
+            schedule["schedule"].remove(lesson)
+            return schedule
+
+        return self._mutate_schedule(week, year, is_base, mut)

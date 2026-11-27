@@ -1,5 +1,7 @@
 """MCP tool registration for PDF generation."""
 
+from datetime import date
+
 from mcp.server import MCPServer
 
 from ..data_access import classes_store, rooms_store, subjects_store, teachers_store
@@ -10,6 +12,15 @@ from ..pdf.summary_pdf import generate_summary_pdf_for_mcp
 
 schedule_store = ScheduleStore()
 EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _get_schedule_for_date(schedule_date: str | None, is_base: bool) -> dict:
+    if schedule_date is None:
+        return schedule_store.get(is_base=is_base)
+
+    requested = date.fromisoformat(schedule_date)
+    year, week, _ = requested.isocalendar()
+    return schedule_store.get(week=week, year=year, is_base=is_base)
 
 
 def register_tools(server: MCPServer) -> None:
@@ -45,7 +56,7 @@ def register_tools(server: MCPServer) -> None:
         if cell_info not in ("full", "teachers", "rooms", "classes"):
             raise ValueError("cell_info должен быть full, teachers, rooms или classes")
 
-        schedule = schedule_store.get(date, is_base)
+        schedule = _get_schedule_for_date(date, is_base)
         return generate_summary_pdf_for_mcp(
             schedule,
             classes_store.load(),
@@ -75,7 +86,7 @@ def register_tools(server: MCPServer) -> None:
         is_base: bool = False,
     ) -> dict:
         """Сформировать PDF расписания одного класса и сохранить его на сервере."""
-        schedule = schedule_store.get(date, is_base)
+        schedule = _get_schedule_for_date(date, is_base)
         return save_class_pdf(
             schedule,
             class_id,

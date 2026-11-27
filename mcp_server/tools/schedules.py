@@ -51,9 +51,17 @@ def _validate_schedule(schedule: list[dict[str, Any]]) -> None:
             raise ValueError(f"Повторяется id урока: {lesson_id}")
         seen_ids.add(lesson_id)
 
-        if not isinstance(lesson["day"], int) or not (1 <= lesson["day"] <= 7):
+        if (
+            isinstance(lesson["day"], bool)
+            or not isinstance(lesson["day"], int)
+            or not 1 <= lesson["day"] <= 7
+        ):
             raise ValueError(f"Урок {lesson_id}: day должен быть целым числом 1..7")
-        if not isinstance(lesson["slot"], int) or lesson["slot"] < 1:
+        if (
+            isinstance(lesson["slot"], bool)
+            or not isinstance(lesson["slot"], int)
+            or lesson["slot"] < 1
+        ):
             raise ValueError(f"Урок {lesson_id}: slot должен быть целым числом >= 1")
         if not isinstance(lesson["classes"], list) or not lesson["classes"]:
             raise ValueError(f"Урок {lesson_id}: classes должен быть непустым списком")
@@ -106,31 +114,77 @@ def _validate_schedule(schedule: list[dict[str, Any]]) -> None:
                     )
 
 
+def _schedule_change_summary(
+    schedule: dict[str, Any], is_base: bool
+) -> dict[str, Any]:
+    return {
+        "meta": schedule["meta"],
+        "lessonCount": len(schedule["schedule"]),
+        "scope": "base" if is_base else "week",
+        "backupCreated": is_base,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Инструменты
 # --------------------------------------------------------------------------- #
 
 def register_tools(server: MCPServer) -> None:
     @server.tool()
-    def get_schedule(date: str | None = None, is_base: bool = False) -> dict:
+    def get_schedule(
+        week: int | None = None,
+        year: int | None = None,
+        day: int | None = None,
+        is_base: bool = False,
+    ) -> dict:
         """Получить базовое или недельное расписание.
 
         Args:
-            date: любая дата недели в формате YYYY-MM-DD. Если пропущена,
-                используется текущая дата сервера.
+            week: номер ISO-недели (1–53). Указывается вместе с year.
+                Если week и year пропущены, используется текущая ISO-неделя.
+            year: ISO-год недели. Указывается вместе с week.
+            day: необязательный день недели (1 — понедельник, 7 — воскресенье).
+                Если задан, вернуть только уроки этого дня.
             is_base: если true, вернуть базовое расписание.
                 Иначе вернуть расписание ISO-недели. Если файла недели нет,
                 вернуть базовое расписание с meta.source="base_fallback";
                 файл недели при этом не создаётся.
 
-        Результат содержит meta и полный массив schedule.
+        Результат содержит meta и массив schedule; без day возвращаются все дни.
         """
-        return schedule_store.get(date, is_base)
+        return schedule_store.get(
+            week=week,
+            year=year,
+            is_base=is_base,
+            day=day,
+        )
+
+    @server.tool()
+    def check_schedule_conflicts(
+        week: int | None = None,
+        year: int | None = None,
+        day: int | None = None,
+        is_base: bool = False,
+    ) -> dict[str, Any]:
+        """Проверить занятость учителей и кабинетов в базе или выбранной неделе."""
+        schedule = schedule_store.get(
+            week=week,
+            year=year,
+            is_base=is_base,
+            day=day,
+        )
+        conflicts = schedule_store.find_conflicts(schedule["schedule"])
+        return {
+            "meta": schedule["meta"],
+            "hasConflicts": bool(conflicts),
+            "conflicts": conflicts,
+        }
 
     @server.tool()
     def update_schedule(
         schedule: list[dict[str, Any]],
-        date: str | None = None,
+        week: int | None = None,
+        year: int | None = None,
         is_base: bool = False,
     ) -> dict:
         """Заменить весь массив schedule в базовом или недельном расписании.
@@ -139,8 +193,9 @@ def register_tools(server: MCPServer) -> None:
             schedule: полный новый массив уроков; каждый объект должен содержать
                 id, day, slot, classes, subjectId, kind, level и parts.
                 Ссылки subjectId/teacherId/roomId проверяются по справочникам.
-            date: любая дата нужной недели в формате YYYY-MM-DD. Если пропущена,
-                используется текущая дата сервера.
+            week: номер ISO-недели. Указывается вместе с year; если оба пропущены,
+                используется текущая ISO-неделя.
+            year: ISO-год недели.
             is_base: если true, изменить базовое расписание.
                 Иначе изменить расписание ISO-недели; при отсутствии файла недели
                 он создаётся один раз в момент записи.
@@ -148,27 +203,68 @@ def register_tools(server: MCPServer) -> None:
         Операция полностью заменяет список schedule и записывает файл атомарно.
         """
         _validate_schedule(schedule)
-        return schedule_store.replace_schedule(schedule, date, is_base)
+        updated = schedule_store.replace_schedule(
+            schedule,
+            week=week,
+            year=year,
+            is_base=is_base,
+        )
+        return _schedule_change_summary(updated, is_base)
 
     @server.tool()
-    def add_lesson(lesson: dict[str, Any], date: str | None = None) -> dict:
+    def rollback_base_schedule() -> dict[str, Any]:
+        """Откатить базовое расписание к предыдущей резервной копии.
+
+        Текущее содержимое базы будет заменено и его изменения будут потеряны.
+        Для отката выбирается самая новая резервная копия.
+        """
+        schedule, backup_name = schedule_store.rollback_base_schedule()
+        return {
+            "restoredFrom": backup_name,
+            "meta": schedule["meta"],
+            "lessonCount": len(schedule["schedule"]),
+        }
+
+    @server.tool()
+    def add_lesson(
+        lesson: dict[str, Any],
+        week: int | None = None,
+        year: int | None = None,
+        is_base: bool = False,
+    ) -> dict:
         """Добавить один урок в недельное расписание.
 
         Args:
             lesson: объект урока (id, day, slot, classes, subjectId, kind, level, parts).
-            date: любая дата нужной недели в формате YYYY-MM-DD.
+            week: номер ISO-недели. Указывается вместе с year; если оба пропущены,
+                используется текущая ISO-неделя.
+            year: ISO-год недели.
+            is_base: если true, добавить урок в базовое расписание.
+                Для этого действия будет сохранена резервная копия базы.
 
-        Если файла недели нет, он создаётся на основе базы, затем урок добавляется.
-        id урока должен быть уникальным в пределах недели.
+        Для недельной записи отсутствующая неделя сначала копируется из базы.
+        При is_base=true урок добавляется непосредственно в базу с резервной копией.
+        id урока должен быть уникальным в выбранном расписании.
         """
         _validate_schedule([lesson])
-        return schedule_store.add_lesson(lesson, date)
+        updated = schedule_store.add_lesson(
+            lesson,
+            week=week,
+            year=year,
+            is_base=is_base,
+        )
+        return {
+            **_schedule_change_summary(updated, is_base),
+            "lesson": lesson,
+        }
 
     @server.tool()
     def update_lesson(
         id: str,
         changes: dict[str, Any],
-        date: str | None = None,
+        week: int | None = None,
+        year: int | None = None,
+        is_base: bool = False,
     ) -> dict:
         """Изменить один урок в недельном расписании по id.
 
@@ -176,33 +272,67 @@ def register_tools(server: MCPServer) -> None:
             id: идентификатор урока.
             changes: поля для изменения (например, slot, day, parts).
                 id менять нельзя — поле будет проигнорировано.
-            date: любая дата нужной недели в формате YYYY-MM-DD.
+            week: номер ISO-недели. Указывается вместе с year; если оба пропущены,
+                используется текущая ISO-неделя.
+            year: ISO-год недели.
+            is_base: если true, изменить базовое расписание и создать его резервную копию.
 
-        Неделя должна уже существовать (быть изменённой ранее).
+        Если недельного файла ещё нет, он создаётся на основе базы.
         """
         changes = {k: v for k, v in changes.items() if k != "id"}
 
         # Проверяем «слитое» состояние: существующий урок + изменения,
         # чтобы update_lesson не мог записать невалидный урок.
-        current = schedule_store.get_week(date)
-        target = next(
-            (l for l in current["schedule"] if l.get("id") == id),
-            None,
+        target = schedule_store.get_lesson_by_id(
+            id,
+            week=week,
+            year=year,
+            is_base=is_base,
         )
         if target is None:
-            raise ValueError(f"Урок с id='{id}' не найден в неделе")
+            source = "базовом расписании" if is_base else "неделе"
+            raise ValueError(f"Урок с id='{id}' не найден в {source}")
         _validate_schedule([{**target, **changes}])
 
-        return schedule_store.update_lesson(id, changes, date)
+        updated = schedule_store.update_lesson(
+            id,
+            changes,
+            week=week,
+            year=year,
+            is_base=is_base,
+        )
+        return {
+            **_schedule_change_summary(updated, is_base),
+            "updatedLessonId": id,
+            "changes": changes,
+        }
 
     @server.tool()
-    def delete_lesson(id: str, date: str | None = None) -> dict:
+    def delete_lesson(
+        id: str,
+        week: int | None = None,
+        year: int | None = None,
+        is_base: bool = False,
+    ) -> dict:
         """Удалить один урок из недельного расписания по id.
 
         Args:
             id: идентификатор урока.
-            date: любая дата нужной недели в формате YYYY-MM-DD.
+            week: номер ISO-недели. Указывается вместе с year; если оба пропущены,
+                используется текущая ISO-неделя.
+            year: ISO-год недели.
+            is_base: если true, удалить урок из базового расписания и создать его
+                резервную копию.
 
-        Неделя должна уже существовать (быть изменённой ранее).
+        Если недельного файла ещё нет, он создаётся на основе базы.
         """
-        return schedule_store.delete_lesson(id, date)
+        updated = schedule_store.delete_lesson(
+            id,
+            week=week,
+            year=year,
+            is_base=is_base,
+        )
+        return {
+            **_schedule_change_summary(updated, is_base),
+            "deletedLessonId": id,
+        }
