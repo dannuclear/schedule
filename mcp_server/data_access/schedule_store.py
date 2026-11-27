@@ -22,8 +22,8 @@ class ScheduleStore:
     """Двухуровневое расписание: база (эталон) + недельные оверрайды.
 
     - base:   DATA_DIR/base/schedule.json       — эталон, меняется редко
-    - week:   DATA_DIR/weeks/YYYY-Www/schedule.json — наследует базу,
-              пока неделя не изменена явно.
+    - week:   DATA_DIR/weeks/YYYY-Www/schedule.json — создаётся как копия базы
+              при первом запросе недели и дальше изменяется независимо.
     """
 
     def _read(self, path: Path) -> dict[str, Any]:
@@ -119,14 +119,16 @@ class ScheduleStore:
         year: int | None = None,
         day: int | None = None,
     ) -> dict[str, Any]:
-        """Вернуть неделю. Если файла недели нет — вернуть базу
-        с пометкой source='base_fallback', НЕ создавая файл."""
+        """Вернуть неделю, при первом запросе создав её копию из базы."""
         self._validate_day(day)
         week_path = self._week_path(week, year)
         if week_path.exists():
             schedule = self._read(week_path)
         else:
-            schedule = self._schedule_from_base(week_path, "base_fallback")
+            schedule = self._schedule_from_base(
+                week_path, "base", include_base_version=True
+            )
+            self._write(week_path, schedule)
         return self._filter_day(schedule, day)
 
     def get(
